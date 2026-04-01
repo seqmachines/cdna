@@ -12,9 +12,13 @@ Create `.env.local`:
 
 ```
 GOOGLE_GENERATIVE_AI_API_KEY=your-key-here
+
+# Optional: enables Google Search fallback when URLs are inaccessible
+GOOGLE_SEARCH_API_KEY=your-key-here
+GOOGLE_SEARCH_ENGINE_ID=your-cx-id
 ```
 
-Get a key from [Google AI Studio](https://aistudio.google.com/apikey).
+Get a Gemini key from [Google AI Studio](https://aistudio.google.com/apikey). For the search fallback, create a [Programmable Search Engine](https://programmablesearchengine.google.com) (enable "Search the entire web") and enable the [Custom Search API](https://console.cloud.google.com/apis/library/customsearch.googleapis.com) in Cloud Console (free: 100 queries/day).
 
 ## Usage
 
@@ -30,6 +34,8 @@ Open `http://localhost:3000`:
 - **Publish** — save to the protocols library
 
 Browse published protocols at `/protocols`.
+
+Both `/api/parse` and `/api/benchmark` support a `protocol_name` FormData field. If the input URL is inaccessible (403/404/timeout) and `GOOGLE_SEARCH_API_KEY` is configured, the endpoint searches Google for the protocol and fetches the first accessible result.
 
 ## Slack bot
 
@@ -54,6 +60,51 @@ A Slack bot lets users parse protocols and ask follow-up questions directly in S
 - `@cDNA parse with claude <url>` — parse with a specific model
 - Reply with a question — follow-up Q&A using the parsed protocol as context
 - Reply `publish` — save to the protocols library
+
+## Benchmark API
+
+`POST /api/benchmark` returns structured JSON for evaluating library structure extraction. Accepts the same inputs as `/api/parse` (url, file, text, model) plus an optional `protocol_name` hint via FormData.
+
+```bash
+curl -X POST http://localhost:3000/api/benchmark \
+  -F "url=https://www.cell.com/fulltext/S0092-8674(15)00549-8" \
+  -F "protocol_name=Drop-seq" \
+  -F "model=google/gemini-3.1-pro-preview"
+```
+
+Response:
+
+```json
+{
+  "result": {
+    "protocol_name": "Drop-seq",
+    "library_sequence": "AATGATACGGCGACCACCGAG...",
+    "segments": [...],
+    "placeholder_key": { "B": "cell barcode", "U": "UMI", "I": "sample index" }
+  },
+  "raw": "...",
+  "source_info": {
+    "primary_url": "https://www.cell.com/fulltext/...",
+    "step_reached": 4,
+    "supplementary_url": "https://www.cell.com/.../mmc1",
+    "fallback_used": true
+  }
+}
+```
+
+Variable regions use typed placeholders (`B`=barcode, `U`=UMI, `I`=index, `L`=ligation, `R`=RT, `T`=Tn5, `X`=linker, `V`=capture) instead of generic `N`.
+
+### Fallback chain
+
+When a URL doesn't yield sequences directly, the endpoint runs a deterministic 5-step fallback:
+
+1. Fetch input URL, send to LLM
+2. Google Search `"{protocol}" sequencing protocol`, fetch top results, send to LLM
+3. Google Search `"{protocol}" paper`, fetch top results, send to LLM
+4. Parse paper HTML for supplementary links, fetch and combine with paper, send to LLM
+5. Report failure
+
+Each step stops as soon as a valid `library_sequence` is found. Steps 2-3 require `GOOGLE_SEARCH_API_KEY` and `GOOGLE_SEARCH_ENGINE_ID` in `.env.local` (skipped if not configured). The `source_info` object in the response tracks which step succeeded.
 
 ## How it works
 

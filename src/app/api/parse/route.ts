@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { parseProtocol } from "@/lib/parse-protocol";
 import { corsHeaders, handleCorsOptions } from "@/lib/cors";
+import { googleSearch } from "@/lib/google-search";
+import { tryFetch, protocolHintFromUrl } from "@/lib/fetch-content";
 
 export const maxDuration = 300;
 
@@ -28,25 +30,32 @@ export async function POST(req: Request) {
     }
 
     if (urlField) {
-      const res = await fetch(urlField);
-      if (!res.ok) {
+      let content = await tryFetch(urlField);
+
+      if (!content) {
+        console.log(`  Direct fetch failed for ${urlField}, searching...`);
+        const hint = (formData.get("protocol_name") as string | null)
+          || protocolHintFromUrl(urlField);
+        for (const searchUrl of await googleSearch(`${hint} sequencing protocol`)) {
+          content = await tryFetch(searchUrl);
+          if (content) {
+            console.log(`  Found via search: ${searchUrl}`);
+            break;
+          }
+        }
+      }
+
+      if (!content) {
         return NextResponse.json(
-          { error: `Failed to fetch URL: ${res.status}` },
+          { error: "Failed to fetch URL and no alternatives found via search" },
           { status: 400, headers: cors }
         );
       }
-      const buffer = Buffer.from(await res.arrayBuffer());
-      const contentType = res.headers.get("content-type") || "";
 
-      const urlPath = new URL(urlField).pathname;
-      const fileName = urlPath.split("/").pop() || "document";
-
-      const markdown = await parseProtocol(urlField, {
-        fileData: buffer,
-        fileName: contentType.includes("text") ? undefined : fileName,
-        text: contentType.includes("text")
-          ? new TextDecoder().decode(buffer)
-          : undefined,
+      const markdown = await parseProtocol(content.url, {
+        fileData: content.isPdf ? content.buffer : undefined,
+        fileName: content.isPdf ? content.fileName : undefined,
+        text: content.isText ? content.text : undefined,
       }, modelField || undefined);
       return NextResponse.json({ markdown }, { headers: cors });
     }
