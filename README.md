@@ -35,7 +35,9 @@ Open `http://localhost:3000`:
 
 Browse published protocols at `/protocols`.
 
-Both `/api/parse` and `/api/benchmark` support a `protocol_name` FormData field. If the input URL is inaccessible (403/404/timeout) and `GOOGLE_SEARCH_API_KEY` is configured, the endpoint searches Google for the protocol and fetches the first accessible result.
+The parse API has two smart fallbacks:
+- **PDF-to-text** — if a model can't read PDF binary, the file is automatically converted to text and retried
+- **Web search** — the LLM has `web_search` and `fetch_url` tools so it can find protocol information when the provided content is insufficient or the URL is inaccessible. Requires `GOOGLE_SEARCH_API_KEY` in `.env.local`.
 
 ## Slack bot
 
@@ -63,12 +65,11 @@ A Slack bot lets users parse protocols and ask follow-up questions directly in S
 
 ## Benchmark API
 
-`POST /api/benchmark` returns structured JSON for evaluating library structure extraction. Accepts the same inputs as `/api/parse` (url, file, text, model) plus an optional `protocol_name` hint via FormData.
+`POST /api/benchmark` returns structured JSON for evaluating library structure extraction. Accepts the same inputs as `/api/parse` (url, file, text, model) via FormData. No search tools or fallback — the benchmark script controls the input format.
 
 ```bash
 curl -X POST http://localhost:3000/api/benchmark \
-  -F "url=https://www.cell.com/fulltext/S0092-8674(15)00549-8" \
-  -F "protocol_name=Drop-seq" \
+  -F "url=https://cdn.10xgenomics.com/image/upload/v1725314293/support-documents/CG000731_ChromiumGEM-X_SingleCell3v4_UserGuide_RevB.pdf" \
   -F "model=google/gemini-3.1-pro-preview"
 ```
 
@@ -77,34 +78,16 @@ Response:
 ```json
 {
   "result": {
-    "protocol_name": "Drop-seq",
+    "protocol_name": "Chromium Single Cell 3' Gene Expression v4",
     "library_sequence": "AATGATACGGCGACCACCGAG...",
     "segments": [...],
     "placeholder_key": { "B": "cell barcode", "U": "UMI", "I": "sample index" }
   },
-  "raw": "...",
-  "source_info": {
-    "primary_url": "https://www.cell.com/fulltext/...",
-    "step_reached": 4,
-    "supplementary_url": "https://www.cell.com/.../mmc1",
-    "fallback_used": true
-  }
+  "raw": "..."
 }
 ```
 
 Variable regions use typed placeholders (`B`=barcode, `U`=UMI, `I`=index, `L`=ligation, `R`=RT, `T`=Tn5, `X`=linker, `V`=capture) instead of generic `N`.
-
-### Fallback chain
-
-When a URL doesn't yield sequences directly, the endpoint runs a deterministic 5-step fallback:
-
-1. Fetch input URL, send to LLM
-2. Google Search `"{protocol}" sequencing protocol`, fetch top results, send to LLM
-3. Google Search `"{protocol}" paper`, fetch top results, send to LLM
-4. Parse paper HTML for supplementary links, fetch and combine with paper, send to LLM
-5. Report failure
-
-Each step stops as soon as a valid `library_sequence` is found. Steps 2-3 require `GOOGLE_SEARCH_API_KEY` and `GOOGLE_SEARCH_ENGINE_ID` in `.env.local` (skipped if not configured). The `source_info` object in the response tracks which step succeeded.
 
 ## How it works
 

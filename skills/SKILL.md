@@ -11,6 +11,16 @@ Parse sequencing protocol documents into a standardized structured format coveri
 
 Any time the user provides a sequencing protocol document (PDF, text, or URL) and wants structured extraction of how the library is built. The input could be a 10x Genomics user guide, an Illumina library prep manual, an Oxford Nanopore protocol, a published methods paper, or any document describing an NGS library preparation workflow.
 
+## Available tools
+
+You have access to two tools:
+- **web_search** — Search Google for protocol information, supplementary materials, or papers
+- **fetch_url** — Fetch and read the content of any URL found via search (PDFs are auto-converted to text)
+
+Use these when the provided content is incomplete or doesn't contain the information you need.
+
+If the input is just a protocol or assay name (e.g., "Drop-seq", "10x Chromium 3' v3"), use web_search to find the protocol documentation and extract the library structure.
+
 ## Input handling
 
 The input can arrive in several forms:
