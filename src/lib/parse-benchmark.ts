@@ -1,6 +1,7 @@
-import { generateText } from "ai";
+import { generateText, stepCountIs } from "ai";
 import { loadBenchmarkPrompt } from "./load-benchmark-prompt";
 import { resolveModel, DEFAULT_MODEL } from "./models";
+import { webSearchTool, fetchUrlTool } from "./tools";
 import type { UserContent } from "ai";
 
 const MIME_TYPES: Record<string, string> = {
@@ -59,6 +60,11 @@ export async function parseBenchmark(
     model: resolveModel(modelId || DEFAULT_MODEL),
     system: systemPrompt,
     messages: [{ role: "user", content: userContent }],
+    tools: {
+      web_search: webSearchTool,
+      fetch_url: fetchUrlTool,
+    },
+    stopWhen: stepCountIs(5),
   });
 
   const parsed = extractJSON(text);

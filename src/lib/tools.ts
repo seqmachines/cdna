@@ -35,7 +35,7 @@ export const webSearchTool = tool({
 export const fetchUrlTool = tool({
   description:
     "Fetch the content of a URL. Use to read pages found via web_search. " +
-    "Returns text content. PDFs are automatically converted to text.",
+    "Returns text content for HTML pages. Returns a note for PDFs (the LLM can read PDFs natively).",
   inputSchema: z.object({
     url: z.string().url().describe("URL to fetch"),
   }),
@@ -52,10 +52,7 @@ export const fetchUrlTool = tool({
       const isPdf = ct.includes("pdf") || url.toLowerCase().endsWith(".pdf");
 
       if (isPdf) {
-        const { pdfToText } = await import("./pdf-to-text");
-        const buffer = Buffer.from(await res.arrayBuffer());
-        const text = await pdfToText(buffer);
-        return { content: text.slice(0, 50000), url, was_pdf: true };
+        return { content: "[PDF file — provide this URL directly to the user or describe what you found]", url, was_pdf: true };
       }
 
       const buffer = await res.arrayBuffer();

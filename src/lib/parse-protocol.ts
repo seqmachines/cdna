@@ -1,7 +1,6 @@
 import { generateText, stepCountIs } from "ai";
 import { loadSkill } from "./load-skill";
 import { resolveModel, DEFAULT_MODEL } from "./models";
-import { pdfToText } from "./pdf-to-text";
 import { webSearchTool, fetchUrlTool } from "./tools";
 import type { UserContent } from "ai";
 
@@ -63,38 +62,13 @@ ${options.text}`;
     fetch_url: fetchUrlTool,
   };
 
-  let text: string;
-  try {
-    const result = await generateText({
-      model: resolveModel(modelId || DEFAULT_MODEL),
-      system: systemPrompt,
-      messages: [{ role: "user", content: userContent }],
-      tools,
-      stopWhen: stepCountIs(5),
-    });
-    text = result.text;
-  } catch (err) {
-    if (options.fileData && options.fileName?.toLowerCase().endsWith(".pdf")) {
-      console.log("  Model can't read PDF, converting to text and retrying...");
-      const extracted = await pdfToText(options.fileData);
-      const textContent = options.text
-        ? options.text + "\n\n" + extracted
-        : extracted;
-
-      const fallbackContent: UserContent = [{ type: "text", text: textContent }];
-
-      const result = await generateText({
-        model: resolveModel(modelId || DEFAULT_MODEL),
-        system: systemPrompt,
-        messages: [{ role: "user", content: fallbackContent }],
-        tools,
-        stopWhen: stepCountIs(5),
-      });
-      text = result.text;
-    } else {
-      throw err;
-    }
-  }
+  const { text } = await generateText({
+    model: resolveModel(modelId || DEFAULT_MODEL),
+    system: systemPrompt,
+    messages: [{ role: "user", content: userContent }],
+    tools,
+    stopWhen: stepCountIs(5),
+  });
 
   return text;
 }

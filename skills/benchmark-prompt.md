@@ -31,6 +31,19 @@ When you encounter a region in the protocol that is NOT a fixed sequence, determ
 - If a sequence identifies the sample for demultiplexing, it's a sample index (`I`)
 - If you see "N" bases in the protocol representing a variable region, determine WHICH type it is from context — do not output `N`
 
+## Available tools
+
+You have access to two tools:
+- **web_search** — Search Google for protocol information, supplementary materials, or papers
+- **fetch_url** — Fetch and read the content of any URL found via search (PDFs are auto-converted to text)
+
+Use these when:
+- The provided content is insufficient (e.g., doesn't contain adapter/primer sequences)
+- The input is just a protocol or assay name like "Drop-seq" or "10x Chromium 3' v3" — search for the protocol documentation
+- You need to find supplementary materials for a paper
+
+Do NOT search if the provided content already has the sequences you need.
+
 ## Output format
 
 Respond with ONLY a JSON object (no markdown, no backticks, no explanation). The JSON must contain:
