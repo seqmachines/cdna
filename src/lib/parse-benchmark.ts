@@ -21,20 +21,21 @@ function getMimeType(filename: string): string {
 
 function extractJSON(text: string): Record<string, unknown> | null {
   // Try direct parse
-  try { return JSON.parse(text); } catch {}
+  try { return JSON.parse(text); } catch { }
   // Strip markdown code fences
   const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-  if (fenceMatch) { try { return JSON.parse(fenceMatch[1]); } catch {} }
+  if (fenceMatch) { try { return JSON.parse(fenceMatch[1]); } catch { } }
   // Find first { ... } block
   const braceMatch = text.match(/\{[\s\S]*\}/);
-  if (braceMatch) { try { return JSON.parse(braceMatch[0]); } catch {} }
+  if (braceMatch) { try { return JSON.parse(braceMatch[0]); } catch { } }
   return null;
 }
 
 export async function parseBenchmark(
   source: string,
   options: { fileData?: Buffer; fileName?: string; text?: string },
-  modelId?: string
+  modelId?: string,
+  useTools: boolean = false,
 ) {
   const systemPrompt = loadBenchmarkPrompt();
 
@@ -56,16 +57,34 @@ export async function parseBenchmark(
 
   userContent.push({ type: "text", text: promptText });
 
-  const { text } = await generateText({
+  const generateOptions: Parameters<typeof generateText>[0] = {
     model: resolveModel(modelId || DEFAULT_MODEL),
     system: systemPrompt,
     messages: [{ role: "user", content: userContent }],
-    tools: {
+  };
+
+  if (useTools) {
+    generateOptions.tools = {
       web_search: webSearchTool,
       fetch_url: fetchUrlTool,
-    },
-    stopWhen: stepCountIs(5),
-  });
+    };
+    generateOptions.stopWhen = stepCountIs(12);
+  }
+
+  const result = await generateText(generateOptions);
+
+  // If final text is empty (e.g., model exhausted step budget on tool calls),
+  // scan backwards through steps for the last non-empty text.
+  let text = result.text;
+  if (!text && Array.isArray(result.steps)) {
+    for (let i = result.steps.length - 1; i >= 0; i--) {
+      const stepText = result.steps[i]?.text;
+      if (stepText) {
+        text = stepText;
+        break;
+      }
+    }
+  }
 
   const parsed = extractJSON(text);
 

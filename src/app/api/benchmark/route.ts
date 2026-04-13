@@ -18,13 +18,15 @@ export async function POST(req: Request) {
     const fileField = formData.get("file");
     const modelField = formData.get("model") as string | null;
     const model = modelField || undefined;
+    const useToolsField = formData.get("use_tools") as string | null;
+    const useTools = useToolsField === "true" || useToolsField === "1";
 
     if (fileField && fileField instanceof File) {
       const buffer = Buffer.from(await fileField.arrayBuffer());
       const data = await parseBenchmark(fileField.name, {
         fileData: buffer,
         fileName: fileField.name,
-      }, model);
+      }, model, useTools);
       return NextResponse.json(data, { headers: cors });
     }
 
@@ -52,13 +54,13 @@ export async function POST(req: Request) {
         fileData: isText ? undefined : buffer,
         fileName: isText ? undefined : fileName,
         text: isText ? new TextDecoder().decode(buffer) : undefined,
-      }, model);
+      }, model, useTools);
 
       return NextResponse.json(data, { headers: cors });
     }
 
     if (textField) {
-      const data = await parseBenchmark("pasted text", { text: textField }, model);
+      const data = await parseBenchmark("pasted text", { text: textField }, model, useTools);
       return NextResponse.json(data, { headers: cors });
     }
 
