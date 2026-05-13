@@ -1,7 +1,7 @@
 import { generateText, stepCountIs } from "ai";
 import { loadSkill } from "./load-skill";
 import { resolveModel, DEFAULT_MODEL } from "./models";
-import { webSearchTool, fetchUrlTool } from "./tools";
+import { ProtocolSchema, type ProtocolParseResult } from "./protocol-schema";
 import type { UserContent } from "ai";
 
 const MIME_TYPES: Record<string, string> = {
@@ -19,7 +19,111 @@ function getMimeType(filename: string): string {
   return MIME_TYPES[ext] || "application/octet-stream";
 }
 
+function extractJSON(text: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(text);
+  } catch {}
+
+  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (fenceMatch) {
+    try {
+      return JSON.parse(fenceMatch[1]);
+    } catch {}
+  }
+
+  const braceMatch = text.match(/\{[\s\S]*\}/);
+  if (braceMatch) {
+    try {
+      return JSON.parse(braceMatch[0]);
+    } catch {}
+  }
+
+  return null;
+}
+
+function protocolJsonPrompt() {
+  return `You are cDNA, a sequencing protocol parser.
+
+Return ONLY valid JSON matching this exact top-level object:
+{
+  "metadata": {},
+  "adapter_primer_sequences": [],
+  "library_generation": [],
+  "library_sequencing": [],
+  "read_structure": {},
+  "final_library_structure": {},
+  "source_spans": {},
+  "warnings": []
+}
+
+Rules:
+- Do not return Markdown, prose, code fences, or explanations outside JSON.
+- Parse sequencing protocols into a scg_lib_structs-style structured representation.
+- adapter_primer_sequences must contain exact copied sequences from the source only.
+- Never invent adapter, primer, barcode, UMI, or index sequences.
+- If a named sequence is mentioned but exact bases are missing, set "sequence": null and add a warning.
+- Preserve modifications when present, such as rG, /5Phos/, /5Biosg/, phosphorothioates, (T)30, or degenerate bases.
+- Use source_spans to store copied evidence text. Each critical claim should cite source_span_ids.
+- library_generation must be ordered by molecular construction step.
+- library_sequencing must describe read names, platform, primers, direction, cycles, template strand, and what each read captures when available.
+- read_structure should be compact and machine-readable, keyed by R1, R2, I1, I2 when available.
+- final_library_structure should contain ordered segments. Use exact bases only if source-backed; use null for unknown biological inserts or missing exact sequences.
+- warnings should list missing sequences, ambiguous orientation, unsupported claims, or inferred details.
+
+Required object shapes:
+- adapter_primer_sequences[]: { "name": string, "role": string|null, "sequence": string|null, "orientation": "5_to_3"|"3_to_5"|"unknown"|null, "modifications": string[], "source_span_ids": string[], "uncertainty": string|null }
+- library_generation[]: { "step_number": number, "name": string, "operation": string|null, "inputs": string[], "outputs": string[], "product_structure": string|null, "used_sequence_names": string[], "conditions": string[], "source_span_ids": string[] }
+- library_sequencing[]: { "read_name": string, "platform": string|null, "primer": string|null, "direction": string|null, "cycles": number|null, "template_strand": string|null, "what_is_read": string[], "source_span_ids": string[] }
+- read_structure: { "R1": [{ "name": string, "start": number|null, "end": number|null, "source_span_ids": string[] }], "R2": [], "I1": [], "I2": [] }
+- final_library_structure: { "orientation": string|null, "segments": [{ "name": string, "type": string, "sequence": string|null, "length": number|null, "source_span_ids": string[] }] }
+- source_spans: { "span_id": { "text": string, "page": number|string|null, "section": string|null, "start": number|null, "end": number|null } }`;
+}
+
 export async function parseProtocol(
+  source: string,
+  options: { fileData?: Buffer; fileName?: string; text?: string },
+  modelId?: string
+): Promise<ProtocolParseResult> {
+  const userContent: UserContent = [];
+
+  if (options.fileData) {
+    userContent.push({
+      type: "file",
+      data: new Uint8Array(options.fileData),
+      mediaType: getMimeType(options.fileName || source),
+    });
+  }
+
+  let promptText = `Parse this sequencing protocol into the required JSON object.
+
+Source: ${source}`;
+
+  if (options.text) {
+    promptText += `
+
+Protocol content:
+${options.text}`;
+  }
+
+  userContent.push({ type: "text", text: promptText });
+
+  const { text } = await generateText({
+    model: resolveModel(modelId || DEFAULT_MODEL),
+    system: protocolJsonPrompt(),
+    messages: [{ role: "user", content: userContent }],
+    stopWhen: stepCountIs(5),
+  });
+
+  const parsed = extractJSON(text);
+  if (!parsed) {
+    throw new Error("Model did not return parseable JSON");
+  }
+
+  const protocol = ProtocolSchema.parse(parsed);
+  return { protocol, raw: text };
+}
+
+export async function parseProtocolMarkdown(
   source: string,
   options: { fileData?: Buffer; fileName?: string; text?: string },
   modelId?: string
@@ -57,16 +161,10 @@ ${options.text}`;
 
   userContent.push({ type: "text", text: promptText });
 
-  const tools = {
-    web_search: webSearchTool,
-    fetch_url: fetchUrlTool,
-  };
-
   const { text } = await generateText({
     model: resolveModel(modelId || DEFAULT_MODEL),
     system: systemPrompt,
     messages: [{ role: "user", content: userContent }],
-    tools,
     stopWhen: stepCountIs(5),
   });
 

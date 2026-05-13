@@ -20,11 +20,11 @@ export async function POST(req: Request) {
 
     if (fileField && fileField instanceof File) {
       const buffer = Buffer.from(await fileField.arrayBuffer());
-      const markdown = await parseProtocol(fileField.name, {
+      const data = await parseProtocol(fileField.name, {
         fileData: buffer,
         fileName: fileField.name,
       }, modelField || undefined);
-      return NextResponse.json({ markdown }, { headers: cors });
+      return NextResponse.json(data, { headers: cors });
     }
 
     if (urlField) {
@@ -40,35 +40,30 @@ export async function POST(req: Request) {
           fileName = new URL(urlField).pathname.split("/").pop() || "document";
         }
       } catch {
-        // URL inaccessible — LLM will use search tools
+        // URL inaccessible.
       }
 
       if (buffer) {
         const isPdf = contentType.includes("pdf") || urlField.toLowerCase().endsWith(".pdf");
         const isText = contentType.includes("text") && !isPdf;
 
-        const markdown = await parseProtocol(urlField, {
+        const data = await parseProtocol(urlField, {
           fileData: isText ? undefined : buffer,
           fileName: isText ? undefined : fileName,
           text: isText ? new TextDecoder().decode(buffer) : undefined,
         }, modelField || undefined);
-        return NextResponse.json({ markdown }, { headers: cors });
+        return NextResponse.json(data, { headers: cors });
       }
 
-      // URL failed — tell LLM to search
-      const protocolHint = formData.get("protocol_name") as string | null;
-      const fallbackText = `Could not access ${urlField}. ` +
-        `Use the web_search tool to find the protocol` +
-        (protocolHint ? ` "${protocolHint}"` : "") +
-        ` and extract its details.`;
-
-      const markdown = await parseProtocol(urlField, { text: fallbackText }, modelField || undefined);
-      return NextResponse.json({ markdown }, { headers: cors });
+      return NextResponse.json(
+        { error: `Failed to fetch URL: ${urlField}` },
+        { status: 400, headers: cors }
+      );
     }
 
     if (textField) {
-      const markdown = await parseProtocol("pasted text", { text: textField }, modelField || undefined);
-      return NextResponse.json({ markdown }, { headers: cors });
+      const data = await parseProtocol("pasted text", { text: textField }, modelField || undefined);
+      return NextResponse.json(data, { headers: cors });
     }
 
     return NextResponse.json(

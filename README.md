@@ -1,6 +1,6 @@
 # cDNA
 
-Parse sequencing protocol documents into structured markdown with ASCII library diagrams. Supports multiple LLM providers via the Vercel AI Gateway.
+Parse sequencing protocol documents into structured scg_lib_structs-style JSON. Supports multiple LLM providers via the Vercel AI Gateway.
 
 ## Setup
 
@@ -12,13 +12,9 @@ Create `.env.local`:
 
 ```
 GOOGLE_GENERATIVE_AI_API_KEY=your-key-here
-
-# Optional: enables Google Search fallback when URLs are inaccessible
-GOOGLE_SEARCH_API_KEY=your-key-here
-GOOGLE_SEARCH_ENGINE_ID=your-cx-id
 ```
 
-Get a Gemini key from [Google AI Studio](https://aistudio.google.com/apikey). For the search fallback, create a [Programmable Search Engine](https://programmablesearchengine.google.com) (enable "Search the entire web") and enable the [Custom Search API](https://console.cloud.google.com/apis/library/customsearch.googleapis.com) in Cloud Console (free: 100 queries/day).
+Get a Gemini key from [Google AI Studio](https://aistudio.google.com/apikey). 
 
 ## Usage
 
@@ -26,22 +22,39 @@ Get a Gemini key from [Google AI Studio](https://aistudio.google.com/apikey). Fo
 npm run dev
 ```
 
-Open `http://localhost:3000`:
+Open `http://localhost:3000`.
 
-- **Parse** — submit a URL, upload a file (PDF/Word/Excel), or paste protocol text
-- **Model** — pick any model from the dropdown (fetched live from Vercel AI Gateway)
-- **Preview** — review the parsed output with rendered ASCII diagrams
-- **Publish** — save to the protocols library
+The primary parser is available at `POST /api/parse`. It accepts a URL, uploaded file, or pasted protocol text and returns validated JSON:
 
-Browse published protocols at `/protocols`.
+```bash
+curl -X POST http://localhost:3000/api/parse \
+  -F "text=10x Chromium Single Cell 3' v3.1 uses Read 1 for 16 bp cell barcode and 12 bp UMI, Read 2 for cDNA insert, and i7/i5 sample indexes." \
+  -F "model=google/gemini-3.1-pro-preview"
+```
 
-The parse API has two smart fallbacks:
-- **PDF-to-text** — if a model can't read PDF binary, the file is automatically converted to text and retried
-- **Web search** — the LLM has `web_search` and `fetch_url` tools so it can find protocol information when the provided content is insufficient or the URL is inaccessible. Requires `GOOGLE_SEARCH_API_KEY` in `.env.local`.
+Response:
+
+```json
+{
+  "protocol": {
+    "metadata": {},
+    "adapter_primer_sequences": [],
+    "library_generation": [],
+    "library_sequencing": [],
+    "read_structure": {},
+    "final_library_structure": {},
+    "source_spans": {},
+    "warnings": []
+  },
+  "raw": "..."
+}
+```
+
+The parse API does not use web search fallback. Provide a reachable URL, uploaded file, or pasted protocol text.
 
 ## Slack bot
 
-A Slack bot lets users parse protocols and ask follow-up questions directly in Slack.
+A Slack bot lets users parse protocols and ask follow-up questions directly in Slack. The Slack workflow still uses the markdown parser so protocol reviews remain readable in threads.
 
 ### Setup
 
@@ -89,16 +102,7 @@ Response:
 
 Variable regions use typed placeholders (`B`=barcode, `U`=UMI, `I`=index, `L`=ligation, `R`=RT, `T`=Tn5, `X`=linker, `V`=capture) instead of generic `N`.
 
-## How it works
-
-The parser sends protocol documents directly to the LLM along with a system prompt (`skills/SKILL.md`) and a reference example (`skills/references/example-output.md`). The LLM reads the document natively (no text extraction) and returns structured markdown covering:
-
-1. **Metadata** — kit name, chemistry version, document reference
-2. **Adapter/primer sequences** — every oligo in 5'→3' orientation
-3. **Step-by-step library construction** — with ASCII diagrams showing molecular products
-4. **Sequencing read configuration** — primer binding, read direction, cycle counts
-
-Parsed protocols are stored as markdown files in `protocols/`.
+See [`CHANGELOG.md`](CHANGELOG.md) for implementation updates.
 
 ## Stack
 

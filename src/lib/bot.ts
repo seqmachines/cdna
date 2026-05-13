@@ -29,7 +29,7 @@ class NoopStateAdapter implements StateAdapter {
   async appendToList() {}
   async getList() { return []; }
 }
-import { parseProtocol } from "./parse-protocol";
+import { parseProtocolMarkdown } from "./parse-protocol";
 import { saveProtocol } from "./protocols";
 import { DEFAULT_MODEL, resolveModel } from "./models";
 
@@ -302,7 +302,7 @@ async function runParseForThread(
 
   try {
     const input = await fetchProtocolInput(state.sourceUrl);
-    const markdown = await parseProtocol(state.sourceUrl, input, modelId);
+    const markdown = await parseProtocolMarkdown(state.sourceUrl, input, modelId);
     const title = extractTitle(markdown);
     const slug = slugify(title);
 
