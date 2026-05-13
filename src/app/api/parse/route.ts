@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { prepareProtocolInput } from "@/lib/extract-input-text";
 import { parseProtocol } from "@/lib/parse-protocol";
 import { corsHeaders, handleCorsOptions } from "@/lib/cors";
 
@@ -20,10 +21,8 @@ export async function POST(req: Request) {
 
     if (fileField && fileField instanceof File) {
       const buffer = Buffer.from(await fileField.arrayBuffer());
-      const data = await parseProtocol(fileField.name, {
-        fileData: buffer,
-        fileName: fileField.name,
-      }, modelField || undefined);
+      const input = await prepareProtocolInput(buffer, fileField.name, fileField.type);
+      const data = await parseProtocol(fileField.name, input, modelField || undefined);
       return NextResponse.json(data, { headers: cors });
     }
 
@@ -44,14 +43,8 @@ export async function POST(req: Request) {
       }
 
       if (buffer) {
-        const isPdf = contentType.includes("pdf") || urlField.toLowerCase().endsWith(".pdf");
-        const isText = contentType.includes("text") && !isPdf;
-
-        const data = await parseProtocol(urlField, {
-          fileData: isText ? undefined : buffer,
-          fileName: isText ? undefined : fileName,
-          text: isText ? new TextDecoder().decode(buffer) : undefined,
-        }, modelField || undefined);
+        const input = await prepareProtocolInput(buffer, fileName, contentType);
+        const data = await parseProtocol(urlField, input, modelField || undefined);
         return NextResponse.json(data, { headers: cors });
       }
 

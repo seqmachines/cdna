@@ -6,6 +6,7 @@ Parse sequencing protocol documents into structured scg_lib_structs-style JSON. 
 
 ```bash
 npm install
+python3 -m pip install -r requirements.txt
 ```
 
 Create `.env.local`:
@@ -51,6 +52,8 @@ Response:
 ```
 
 The parse API does not use web search fallback. Provide a reachable URL, uploaded file, or pasted protocol text.
+
+PDF inputs are converted to text locally with Python `pypdf` before parsing. Text inputs and extracted PDF text go through Python-based deterministic sequence inventory extraction so copied adapter/primer candidates can constrain the LLM output.
 
 ## Slack bot
 

@@ -2,6 +2,7 @@ import { generateText, stepCountIs } from "ai";
 import { loadSkill } from "./load-skill";
 import { resolveModel, DEFAULT_MODEL } from "./models";
 import { ProtocolSchema, type ProtocolParseResult } from "./protocol-schema";
+import { buildProtocolContext, finalizeProtocolFromModel } from "./python-protocol-tools";
 import type { UserContent } from "ai";
 
 const MIME_TYPES: Record<string, string> = {
@@ -17,28 +18,6 @@ const MIME_TYPES: Record<string, string> = {
 function getMimeType(filename: string): string {
   const ext = filename.toLowerCase().match(/\.[^.]+$/)?.[0] || "";
   return MIME_TYPES[ext] || "application/octet-stream";
-}
-
-function extractJSON(text: string): Record<string, unknown> | null {
-  try {
-    return JSON.parse(text);
-  } catch {}
-
-  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
-  if (fenceMatch) {
-    try {
-      return JSON.parse(fenceMatch[1]);
-    } catch {}
-  }
-
-  const braceMatch = text.match(/\{[\s\S]*\}/);
-  if (braceMatch) {
-    try {
-      return JSON.parse(braceMatch[0]);
-    } catch {}
-  }
-
-  return null;
 }
 
 function protocolJsonPrompt() {
@@ -85,6 +64,7 @@ export async function parseProtocol(
   modelId?: string
 ): Promise<ProtocolParseResult> {
   const userContent: UserContent = [];
+  const protocolContext = options.text ? await buildProtocolContext(options.text) : null;
 
   if (options.fileData) {
     userContent.push({
@@ -102,7 +82,7 @@ Source: ${source}`;
     promptText += `
 
 Protocol content:
-${options.text}`;
+${options.text}${protocolContext?.prompt_block || ""}`;
   }
 
   userContent.push({ type: "text", text: promptText });
@@ -114,12 +94,11 @@ ${options.text}`;
     stopWhen: stepCountIs(5),
   });
 
-  const parsed = extractJSON(text);
-  if (!parsed) {
-    throw new Error("Model did not return parseable JSON");
-  }
-
-  const protocol = ProtocolSchema.parse(parsed);
+  const finalized = await finalizeProtocolFromModel(
+    text,
+    protocolContext?.inventory || { candidates: [], source_spans: {} }
+  );
+  const protocol = ProtocolSchema.parse(finalized);
   return { protocol, raw: text };
 }
 

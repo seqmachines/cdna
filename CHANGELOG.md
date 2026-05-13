@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added local PDF-to-text extraction for `/api/parse` via `scripts/pdf_to_text.py` and Python `pypdf`.
+- Added Python-based deterministic sequence inventory extraction for text inputs and extracted PDF text.
+- Moved protocol parse support logic for inventory prompt construction and raw model JSON finalization into `scripts/protocol_parse_support.py`.
+- Added an LLM audit prompt that treats extracted sequence candidates as authoritative for `adapter_primer_sequences`.
+- Added a post-parse guard that rejects non-null adapter/primer sequences not found in the deterministic inventory.
+
+### Notes
+
+- This is the v1 sequence inventory extractor branch.
+- Library Construction Extractor is still deferred.
+
 ## v0.2.0
 
 ### Changed
