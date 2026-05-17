@@ -13,6 +13,7 @@ export interface PythonProtocolContext {
     source_spans: Record<string, unknown>;
   };
   prompt_block: string;
+  audit_prompt: string;
 }
 
 async function runProtocolSupport(args: string[]) {
@@ -51,6 +52,19 @@ export async function finalizeProtocolFromModel(
     await writeFile(rawPath, rawText, "utf-8");
     await writeFile(inventoryPath, JSON.stringify(inventory), "utf-8");
     const stdout = await runProtocolSupport(["finalize", rawPath, inventoryPath]);
+    return JSON.parse(stdout) as Record<string, unknown>;
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+export async function parseAuditFromModel(rawText: string) {
+  const dir = await mkdtemp(path.join(tmpdir(), "cdna-audit-"));
+  const rawPath = path.join(dir, `${randomUUID()}-audit.txt`);
+
+  try {
+    await writeFile(rawPath, rawText, "utf-8");
+    const stdout = await runProtocolSupport(["parse-audit", rawPath]);
     return JSON.parse(stdout) as Record<string, unknown>;
   } finally {
     await rm(dir, { recursive: true, force: true });

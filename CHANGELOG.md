@@ -4,11 +4,17 @@
 
 ### Added
 
-- Added local PDF-to-text extraction for `/api/parse` via `scripts/pdf_to_text.py` and Python `pypdf`.
+- Added `POST /api/extract` as the primary staged v1 endpoint for metadata plus adapter/primer extraction.
+- Added `POST /api/one-pass-baseline` for the one-call LLM baseline and removed the legacy `/api/parse` route.
+- Added local PDF-to-text extraction for protocol inputs via `scripts/pdf_to_text.py` and Python `pypdf`.
 - Added Python-based deterministic sequence inventory extraction for text inputs and extracted PDF text.
+- Added the TSV-backed known sequence inventory seed file at `data/sequence_inventory/oligos.tsv`.
 - Moved protocol parse support logic for inventory prompt construction and raw model JSON finalization into `scripts/protocol_parse_support.py`.
-- Added an LLM audit prompt that treats extracted sequence candidates as authoritative for `adapter_primer_sequences`.
-- Added a post-parse guard that rejects non-null adapter/primer sequences not found in the deterministic inventory.
+- Added an LLM audit prompt for human review of suspected missed oligo elements, regex gaps, proposed TSV rows, and proposed extractor changes.
+- Added a reduced v1 protocol schema covering metadata, adapter/primer sequences, source spans, and warnings.
+- Added extractor coverage for 10x Chromium 5' Section 1-style composite oligos, placeholders, nested primer labels, double-stranded adapters, and subsequence deduplication.
+- Added deterministic `/api/extract` artifact writes under `outputs/`: final parsed JSON, raw sequence-inventory TSV, and extracted protocol text.
+- Added a Python smoke-test script for sequence inventory extraction.
 
 ### Notes
 

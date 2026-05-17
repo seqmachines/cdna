@@ -25,11 +25,11 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-The primary parser is available at `POST /api/parse`. It accepts a URL, uploaded file, or pasted protocol text and returns validated JSON:
+The primary v1 extractor is available at `POST /api/extract`. It accepts a URL, uploaded file, or pasted protocol text and returns validated JSON with protocol metadata plus adapter/primer sequences:
 
 ```bash
-curl -X POST http://localhost:3000/api/parse \
-  -F "text=10x Chromium Single Cell 3' v3.1 uses Read 1 for 16 bp cell barcode and 12 bp UMI, Read 2 for cDNA insert, and i7/i5 sample indexes." \
+curl -X POST http://localhost:3000/api/extract \
+  -F "text=Poly-dT RT primer: 5'- AAGCAGTGGTATCAACGCAGAGTAC TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTVN -3'" \
   -F "model=google/gemini-3.1-pro-preview"
 ```
 
@@ -38,12 +38,15 @@ Response:
 ```json
 {
   "protocol": {
-    "metadata": {},
+    "metadata": {
+      "modality": [],
+      "category": [],
+      "inputs": [],
+      "outputs": [],
+      "cost": null,
+      "time": null
+    },
     "adapter_primer_sequences": [],
-    "library_generation": [],
-    "library_sequencing": [],
-    "read_structure": {},
-    "final_library_structure": {},
     "source_spans": {},
     "warnings": []
   },
@@ -51,9 +54,25 @@ Response:
 }
 ```
 
-The parse API does not use web search fallback. Provide a reachable URL, uploaded file, or pasted protocol text.
+The one-call LLM baseline is available at `POST /api/one-pass-baseline`.
 
-PDF inputs are converted to text locally with Python `pypdf` before parsing. Text inputs and extracted PDF text go through Python-based deterministic sequence inventory extraction so copied adapter/primer candidates can constrain the LLM output.
+The extraction APIs do not use web search fallback. Provide a reachable URL, uploaded file, or pasted protocol text.
+
+PDF inputs are converted to text locally with Python `pypdf` before extraction. Text inputs and extracted PDF text go through Python-based deterministic sequence inventory extraction. The staged `/api/extract` path uses the deterministic oligo list as the returned adapter/primer source of truth, while the LLM extracts metadata and audits suspected missed oligos.
+
+Each successful `/api/extract` run writes deterministic local artifacts under `outputs/`:
+
+- `<source>.extract.json` — the final parsed API response after schema validation.
+- `<source>.sequence-inventory.tsv` — every deterministic sequence candidate from `scripts/sequence_inventory.py`.
+- `<source>.protocol.txt` — the extracted text used for deterministic extraction and LLM metadata parsing.
+
+Known adapter and primer elements are seeded in `data/sequence_inventory/oligos.tsv`. The extractor merges known inventory hits with deterministic sequence candidates, deduplicates subsequence hits, and returns advisory LLM audit findings for human review only. The LLM does not modify the TSV or extractor code.
+
+To smoke-test sequence inventory extraction:
+
+```bash
+python3 scripts/test_sequence_inventory.py
+```
 
 ## Slack bot
 
@@ -81,7 +100,7 @@ A Slack bot lets users parse protocols and ask follow-up questions directly in S
 
 ## Benchmark API
 
-`POST /api/benchmark` returns structured JSON for evaluating library structure extraction. Accepts the same inputs as `/api/parse` (url, file, text, model) via FormData. No search tools or fallback — the benchmark script controls the input format.
+`POST /api/benchmark` returns structured JSON for evaluating library structure extraction. Accepts the same inputs as `/api/extract` (url, file, text, model) via FormData. No search tools or fallback — the benchmark script controls the input format.
 
 ```bash
 curl -X POST http://localhost:3000/api/benchmark \

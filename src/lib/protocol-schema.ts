@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const NullableString = z.string().nullable();
 const SourceSpanIds = z.array(z.string()).default([]);
+const NullableNumber = z.number().nullable();
 
 export const SourceSpanSchema = z
   .object({
@@ -13,6 +14,67 @@ export const SourceSpanSchema = z
   })
   .passthrough();
 
+export const MetadataQuantitySchema = z
+  .object({
+    type: z.string(),
+    value: z.union([z.number(), z.string()]).nullable().optional(),
+    min: NullableNumber.optional(),
+    max: NullableNumber.optional(),
+    unit: NullableString.optional(),
+    description: NullableString.optional(),
+    source_span_ids: SourceSpanIds,
+  })
+  .passthrough();
+
+export const CostSchema = z
+  .object({
+    amount: z.union([z.number(), z.string()]).nullable().optional(),
+    min: NullableNumber.optional(),
+    max: NullableNumber.optional(),
+    currency: NullableString.optional(),
+    description: NullableString.optional(),
+    source_span_ids: SourceSpanIds,
+  })
+  .passthrough()
+  .nullable()
+  .default(null);
+
+export const TimeSchema = z
+  .object({
+    duration: z.union([z.number(), z.string()]).nullable().optional(),
+    min: NullableNumber.optional(),
+    max: NullableNumber.optional(),
+    unit: NullableString.optional(),
+    description: NullableString.optional(),
+    source_span_ids: SourceSpanIds,
+  })
+  .passthrough()
+  .nullable()
+  .default(null);
+
+export const ProtocolMetadataSchema = z
+  .object({
+    modality: z
+      .array(z.enum(["DNA", "RNA", "protein", "chromatin_accessibility", "VDJ", "other"]))
+      .default([]),
+    category: z
+      .array(z.enum(["single_cell", "spatial", "time_series", "bulk", "other"]))
+      .default([]),
+    inputs: z.array(MetadataQuantitySchema).default([]),
+    outputs: z.array(MetadataQuantitySchema).default([]),
+    cost: CostSchema,
+    time: TimeSchema,
+  })
+  .passthrough()
+  .default({
+    modality: [],
+    category: [],
+    inputs: [],
+    outputs: [],
+    cost: null,
+    time: null,
+  });
+
 export const AdapterPrimerSequenceSchema = z
   .object({
     name: z.string(),
@@ -23,71 +85,20 @@ export const AdapterPrimerSequenceSchema = z
       .nullable()
       .optional(),
     modifications: z.array(z.string()).default([]),
+    source: z
+      .enum(["known_inventory", "deterministic", "regex", "llm_named_missing"])
+      .nullable()
+      .default(null),
+    inventory_id: NullableString.default(null),
     source_span_ids: SourceSpanIds,
     uncertainty: NullableString.optional(),
   })
   .passthrough();
 
-export const LibraryGenerationStepSchema = z
-  .object({
-    step_number: z.number().int().positive(),
-    name: z.string(),
-    operation: NullableString.optional(),
-    inputs: z.array(z.string()).default([]),
-    outputs: z.array(z.string()).default([]),
-    product_structure: NullableString.optional(),
-    used_sequence_names: z.array(z.string()).default([]),
-    conditions: z.array(z.string()).default([]),
-    source_span_ids: SourceSpanIds,
-  })
-  .passthrough();
-
-export const LibrarySequencingReadSchema = z
-  .object({
-    read_name: z.string(),
-    platform: NullableString.optional(),
-    primer: NullableString.optional(),
-    direction: NullableString.optional(),
-    cycles: z.number().int().positive().nullable().optional(),
-    template_strand: NullableString.optional(),
-    what_is_read: z.array(z.string()).default([]),
-    source_span_ids: SourceSpanIds,
-  })
-  .passthrough();
-
-export const ReadSegmentSchema = z
-  .object({
-    name: z.string(),
-    start: z.number().int().positive().nullable().default(null),
-    end: z.number().int().positive().nullable().default(null),
-    source_span_ids: SourceSpanIds,
-  })
-  .passthrough();
-
-export const FinalLibrarySegmentSchema = z
-  .object({
-    name: z.string(),
-    type: z.string(),
-    sequence: NullableString.default(null),
-    length: z.number().int().nonnegative().nullable().default(null),
-    source_span_ids: SourceSpanIds,
-  })
-  .passthrough();
-
 export const ProtocolSchema = z
   .object({
-    metadata: z.record(z.string(), z.unknown()).default({}),
+    metadata: ProtocolMetadataSchema,
     adapter_primer_sequences: z.array(AdapterPrimerSequenceSchema).default([]),
-    library_generation: z.array(LibraryGenerationStepSchema).default([]),
-    library_sequencing: z.array(LibrarySequencingReadSchema).default([]),
-    read_structure: z.record(z.string(), z.array(ReadSegmentSchema)).default({}),
-    final_library_structure: z
-      .object({
-        orientation: NullableString.optional(),
-        segments: z.array(FinalLibrarySegmentSchema).default([]),
-      })
-      .passthrough()
-      .default({ segments: [] }),
     source_spans: z.record(z.string(), SourceSpanSchema).default({}),
     warnings: z.array(z.string()).default([]),
   })
@@ -98,4 +109,10 @@ export type Protocol = z.infer<typeof ProtocolSchema>;
 export interface ProtocolParseResult {
   protocol: Protocol;
   raw: string;
+  audit?: Record<string, unknown>;
+  artifacts?: {
+    final_json?: string;
+    sequence_inventory_tsv?: string;
+    protocol_text?: string;
+  };
 }

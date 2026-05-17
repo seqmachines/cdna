@@ -39,10 +39,10 @@ def extract_json(text: str) -> dict[str, Any] | None:
 def build_context(text: str) -> dict[str, Any]:
     inventory = extract_sequence_inventory(text)
     candidates = inventory["candidates"]
-    if not candidates:
-        return {"inventory": inventory, "prompt_block": ""}
+    prompt_block = ""
 
-    prompt_block = f"""
+    if candidates:
+        prompt_block = f"""
 
 Deterministic sequence inventory:
 {json.dumps({"sequence_candidates": candidates, "source_spans": inventory["source_spans"]}, indent=2, ensure_ascii=False)}
@@ -53,7 +53,67 @@ Sequence inventory rules:
 - You may label roles, names, orientation, modifications, and uncertainty.
 - You may include entries with "sequence": null for named sequences mentioned in the protocol but missing exact bases.
 - Do not create, normalize, reverse-complement, or repair sequence strings."""
-    return {"inventory": inventory, "prompt_block": prompt_block}
+
+    audit_prompt = f"""Audit this sequencing protocol for missed adapter, primer, oligo, index, or platform sequence elements.
+
+Return ONLY valid JSON with this shape:
+{{
+  "audit_status": "pass",
+  "missing_sequences": [
+    {{
+      "name_hint": null,
+      "sequence_text": null,
+      "source_span": "",
+      "reason_script_missed_it": "",
+      "suggested_regex_case": null
+    }}
+  ],
+  "suspected_regex_gaps": [],
+  "proposed_inventory_rows": [
+    {{
+      "id": null,
+      "name": null,
+      "sequence": null,
+      "role": null,
+      "platform": null,
+      "protocol": null,
+      "source_url": null,
+      "orientation": null,
+      "modifications": null,
+      "notes": null
+    }}
+  ],
+  "proposed_extractor_changes": [],
+  "human_review_required": true
+}}
+
+Rules:
+- audit_status must be one of "pass", "missing_candidates_found", or "uncertain".
+- You are auditing the deterministic extractor; do not rewrite code.
+- If a sequence-like oligo is missing, quote the exact source text in source_span.
+- proposed_inventory_rows are suggestions only and must be human reviewed.
+- Do not invent sequence strings. sequence_text must be copied from protocol text or null.
+
+Deterministic extractor result:
+{json.dumps(inventory, indent=2, ensure_ascii=False)}
+
+Protocol text:
+{text[:50000]}"""
+    return {"inventory": inventory, "prompt_block": prompt_block, "audit_prompt": audit_prompt}
+
+
+def parse_audit(raw_text: str) -> dict[str, Any]:
+    parsed = extract_json(raw_text)
+    if parsed is None:
+        raise ValueError("Audit model did not return parseable JSON")
+
+    parsed.setdefault("audit_status", "uncertain")
+    parsed.setdefault("missing_sequences", [])
+    parsed.setdefault("suspected_regex_gaps", [])
+    parsed.setdefault("proposed_inventory_rows", [])
+    parsed.setdefault("proposed_extractor_changes", [])
+    parsed["human_review_required"] = True
+    return parsed
 
 
 def finalize_protocol(raw_text: str, inventory: dict[str, Any]) -> dict[str, Any]:
@@ -104,6 +164,14 @@ def main() -> int:
             raw_text = Path(sys.argv[2]).read_text(encoding="utf-8", errors="ignore")
             inventory = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
             print(json.dumps(finalize_protocol(raw_text, inventory), ensure_ascii=False))
+            return 0
+
+        if command == "parse-audit":
+            if len(sys.argv) != 3:
+                print("Usage: protocol_parse_support.py parse-audit <raw_audit_path>", file=sys.stderr)
+                return 2
+            raw_text = Path(sys.argv[2]).read_text(encoding="utf-8", errors="ignore")
+            print(json.dumps(parse_audit(raw_text), ensure_ascii=False))
             return 0
     except Exception as exc:
         print(str(exc), file=sys.stderr)

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prepareProtocolInput } from "@/lib/extract-input-text";
-import { parseProtocol } from "@/lib/parse-protocol";
+import { extractProtocolStaged } from "@/lib/parse-protocol";
 import { corsHeaders, handleCorsOptions } from "@/lib/cors";
 
 export const maxDuration = 300;
@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     if (fileField && fileField instanceof File) {
       const buffer = Buffer.from(await fileField.arrayBuffer());
       const input = await prepareProtocolInput(buffer, fileField.name, fileField.type);
-      const data = await parseProtocol(fileField.name, input, modelField || undefined);
+      const data = await extractProtocolStaged(fileField.name, input, modelField || undefined);
       return NextResponse.json(data, { headers: cors });
     }
 
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
 
       if (buffer) {
         const input = await prepareProtocolInput(buffer, fileName, contentType);
-        const data = await parseProtocol(urlField, input, modelField || undefined);
+        const data = await extractProtocolStaged(urlField, input, modelField || undefined);
         return NextResponse.json(data, { headers: cors });
       }
 
@@ -55,7 +55,11 @@ export async function POST(req: Request) {
     }
 
     if (textField) {
-      const data = await parseProtocol("pasted text", { text: textField }, modelField || undefined);
+      const data = await extractProtocolStaged(
+        "pasted text",
+        { text: textField },
+        modelField || undefined
+      );
       return NextResponse.json(data, { headers: cors });
     }
 
@@ -64,9 +68,9 @@ export async function POST(req: Request) {
       { status: 400, headers: cors }
     );
   } catch (err) {
-    console.error("Parse error:", err);
+    console.error("Extract error:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Parse failed" },
+      { error: err instanceof Error ? err.message : "Extract failed" },
       { status: 500, headers: cors }
     );
   }
