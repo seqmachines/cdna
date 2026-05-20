@@ -91,6 +91,12 @@ export const AdapterPrimerSequenceSchema = z
       .default(null),
     inventory_id: NullableString.default(null),
     source_span_ids: SourceSpanIds,
+    confidence: z.number().min(0).max(1).nullable().optional(),
+    review_status: z
+      .enum(["accepted", "needs_review", "accepted_by_rules"])
+      .nullable()
+      .optional(),
+    review_note: NullableString.optional(),
     uncertainty: NullableString.optional(),
   })
   .passthrough();
@@ -112,6 +118,7 @@ export interface ProtocolParseResult {
   audit?: Record<string, unknown>;
   artifacts?: {
     final_json?: string;
+    final_oligo_tsv?: string;
     sequence_inventory_tsv?: string;
     protocol_text?: string;
   };

@@ -68,6 +68,27 @@ Return ONLY valid JSON with this shape:
       "suggested_regex_case": null
     }}
   ],
+  "candidate_reviews": [
+    {{
+      "candidate_id": "",
+      "source_span_id": "",
+      "decision": "accept",
+      "confidence": 0.0,
+      "suggested_name": null,
+      "suggested_role": null,
+      "sequence": null,
+      "reason": ""
+    }}
+  ],
+  "oligo_terms": [
+    {{
+      "name_hint": null,
+      "sequence_text": null,
+      "source_span": "",
+      "matched_candidate_ids": [],
+      "reason": ""
+    }}
+  ],
   "suspected_regex_gaps": [],
   "proposed_inventory_rows": [
     {{
@@ -90,7 +111,15 @@ Return ONLY valid JSON with this shape:
 Rules:
 - audit_status must be one of "pass", "missing_candidates_found", or "uncertain".
 - You are auditing the deterministic extractor; do not rewrite code.
+- oligo_terms must list adapter, primer, oligo, index, or platform sequence names/terms found in the protocol text, whether or not an exact sequence is printed nearby.
+- For each oligo_terms item, matched_candidate_ids must refer only to deterministic candidate ids from sequence_candidates.
+- candidate_reviews must review deterministic extractor candidates. decision must be "accept", "reject", or "review".
+- candidate_reviews.confidence is your confidence from 0.0 to 1.0 that the candidate is a real adapter, primer, oligo, index, or platform sequence copied from the protocol.
+- Reject candidates that are English words, legal boilerplate, PDF headers/footers, or prose accidentally matching IUPAC nucleotide letters.
+- Do not generate, rewrite, normalize, repair, reverse-complement, complete, or otherwise change any candidate sequence strings.
+- In candidate_reviews, sequence must always be null. You may only accept/reject/review existing candidate_id/source_span_id rows and suggest clearer names/roles.
 - If a sequence-like oligo is missing, quote the exact source text in source_span.
+- If an oligo is named but exact bases are absent, set sequence_text to null. Do not infer or generate the missing bases.
 - proposed_inventory_rows are suggestions only and must be human reviewed.
 - Do not invent sequence strings. sequence_text must be copied from protocol text or null.
 
@@ -109,6 +138,8 @@ def parse_audit(raw_text: str) -> dict[str, Any]:
 
     parsed.setdefault("audit_status", "uncertain")
     parsed.setdefault("missing_sequences", [])
+    parsed.setdefault("candidate_reviews", [])
+    parsed.setdefault("oligo_terms", [])
     parsed.setdefault("suspected_regex_gaps", [])
     parsed.setdefault("proposed_inventory_rows", [])
     parsed.setdefault("proposed_extractor_changes", [])

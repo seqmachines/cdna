@@ -223,12 +223,21 @@ def has_sequence_label(line: str) -> bool:
     return any(term in lower for term in LABEL_TERMS)
 
 
+def has_unexpected_lowercase(sequence: str) -> bool:
+    without_placeholders = PLACEHOLDER_PATTERN.sub("", sequence)
+    without_rna_mods = re.sub(r"r[ACGTU]", "", without_placeholders)
+    return bool(re.search(r"[a-z]", without_rna_mods))
+
+
 def base_like_length(sequence: str) -> int:
     without_placeholders = PLACEHOLDER_PATTERN.sub("", sequence)
     return len(re.findall(r"[ACGTURYSWKMBDHVNacgturyswkmbdhvn]", without_placeholders))
 
 
 def is_likely_sequence(sequence: str, line: str) -> bool:
+    if has_unexpected_lowercase(sequence):
+        return False
+
     base_length = base_like_length(sequence)
     has_modification = bool(re.search(r"/[^/\s]+/|[rR][ACGTUacgtu]|\([dD]?[ACGTUacgtu]\)", sequence))
     label_nearby = has_sequence_label(line)

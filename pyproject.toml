@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cdna-engine"
+version = "0.1.0"
+description = "Python parser and curation engine for cDNA protocol extraction."
+requires-python = ">=3.11"
+dependencies = [
+  "beautifulsoup4>=4.12",
+  "litellm>=1.70",
+  "lxml>=5.0",
+  "pypdf>=4.0",
+  "rich>=13.0",
+  "typer>=0.12",
+]
+
+[project.scripts]
+cdna = "cdna_engine.cli:app"
+
+[tool.setuptools]
+packages = ["cdna_engine", "cdna_engine.oligos"]

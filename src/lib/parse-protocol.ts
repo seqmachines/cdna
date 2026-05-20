@@ -12,6 +12,8 @@ import {
 } from "./python-protocol-tools";
 import type { UserContent } from "ai";
 
+type FinalOligo = Protocol["adapter_primer_sequences"][number];
+
 const MIME_TYPES: Record<string, string> = {
   ".pdf": "application/pdf",
   ".doc": "application/msword",
@@ -54,6 +56,7 @@ Rules:
 - metadata.cost and metadata.time are nullable structured objects with source_span_ids.
 - adapter_primer_sequences must contain exact copied sequences from the source only.
 - Never invent adapter, primer, barcode, UMI, index, cost, time, input, or output quantities.
+- Never generate, normalize, repair, complete, reverse-complement, or otherwise modify sequence strings.
 - If a named sequence is mentioned but exact bases are missing, set "sequence": null and add a warning.
 - Preserve modifications and placeholders when present, such as rG, /5Phos/, /5Biosg/, (T)30, degenerate bases, [16-bp cell barcode], or [8-bp sample index].
 - Use source_spans to store copied evidence text. Each critical claim should cite source_span_ids.
@@ -79,6 +82,7 @@ function hasAuditFindings(audit: Record<string, unknown>) {
   const status = audit.audit_status;
   const hasListFindings = [
     "missing_sequences",
+    "candidate_reviews",
     "suspected_regex_gaps",
     "proposed_inventory_rows",
     "proposed_extractor_changes",
@@ -126,8 +130,17 @@ function candidateStringArray(value: unknown): string[] {
     : [];
 }
 
-function candidateOrientation(value: unknown) {
+function candidateOrientation(value: unknown): FinalOligo["orientation"] {
   return value === "5_to_3" || value === "3_to_5" || value === "unknown" ? value : "unknown";
+}
+
+function candidateNumber(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.min(1, Math.max(0, value));
+}
+
+function candidateDecision(value: unknown) {
+  return value === "accept" || value === "reject" || value === "review" ? value : null;
 }
 
 function outputSlug(source: string) {
@@ -154,29 +167,50 @@ function tsvCell(value: unknown) {
 }
 
 function sequenceInventoryTsv(inventory: PythonProtocolContext["inventory"]) {
-  const columns = [
-    "id",
-    "source",
-    "inventory_id",
-    "inventory_file",
-    "name_hint",
-    "role_hint",
-    "sequence",
-    "orientation_hint",
-    "modifications",
-    "source_span_id",
-    "confidence",
-    "start",
-    "end",
-    "platform",
-    "protocol",
-    "source_url",
-    "notes",
-    "source_text",
+  const columns: Array<{ header: string; key: string }> = [
+    { header: "id", key: "id" },
+    { header: "source", key: "source" },
+    { header: "inventory_id", key: "inventory_id" },
+    { header: "inventory_file", key: "inventory_file" },
+    { header: "name_hint", key: "name_hint" },
+    { header: "role_hint", key: "role_hint" },
+    { header: "sequence", key: "sequence" },
+    { header: "orientation_hint", key: "orientation_hint" },
+    { header: "modifications", key: "modifications" },
+    { header: "source_span_id", key: "source_span_id" },
+    { header: "heuristic_score", key: "confidence" },
+    { header: "start", key: "start" },
+    { header: "end", key: "end" },
+    { header: "platform", key: "platform" },
+    { header: "protocol", key: "protocol" },
+    { header: "source_url", key: "source_url" },
+    { header: "notes", key: "notes" },
+    { header: "source_text", key: "source_text" },
   ];
 
   const rows = (inventory.candidates || []).map((candidate) =>
-    columns.map((column) => tsvCell(candidate[column])).join("\t")
+    columns.map((column) => tsvCell(candidate[column.key])).join("\t")
+  );
+  return [columns.map((column) => column.header).join("\t"), ...rows].join("\n") + "\n";
+}
+
+function finalOligoTsv(protocol: Protocol) {
+  const columns = [
+    "name",
+    "role",
+    "sequence",
+    "orientation",
+    "modifications",
+    "source",
+    "inventory_id",
+    "source_span_ids",
+    "confidence",
+    "review_status",
+    "review_note",
+    "uncertainty",
+  ];
+  const rows = protocol.adapter_primer_sequences.map((oligo) =>
+    columns.map((column) => tsvCell(oligo[column as keyof typeof oligo])).join("\t")
   );
   return [columns.join("\t"), ...rows].join("\n") + "\n";
 }
@@ -191,12 +225,14 @@ async function writeExtractionArtifacts(
   const rootDir = process.cwd();
   const outputDir = path.join(/* turbopackIgnore: true */ rootDir, "outputs");
   const finalJsonRelative = path.join("outputs", `${slug}.extract.json`);
+  const finalOligoTsvRelative = path.join("outputs", `${slug}.final-oligos.tsv`);
   const inventoryTsvRelative = path.join("outputs", `${slug}.sequence-inventory.tsv`);
   const protocolTextRelative = protocolText
     ? path.join("outputs", `${slug}.protocol.txt`)
     : undefined;
   const artifacts = {
     final_json: finalJsonRelative,
+    final_oligo_tsv: finalOligoTsvRelative,
     sequence_inventory_tsv: inventoryTsvRelative,
     ...(protocolTextRelative ? { protocol_text: protocolTextRelative } : {}),
   };
@@ -216,6 +252,11 @@ async function writeExtractionArtifacts(
     "utf-8"
   );
   await writeFile(
+    path.join(/* turbopackIgnore: true */ rootDir, finalOligoTsvRelative),
+    finalOligoTsv(result.protocol),
+    "utf-8"
+  );
+  await writeFile(
     path.join(/* turbopackIgnore: true */ rootDir, finalJsonRelative),
     JSON.stringify(resultWithArtifacts, null, 2) + "\n",
     "utf-8"
@@ -224,30 +265,178 @@ async function writeExtractionArtifacts(
   return resultWithArtifacts;
 }
 
-function inventoryToAdapterPrimerSequences(inventory: PythonProtocolContext["inventory"]) {
-  return (inventory.candidates || []).map((candidate, index) => {
+interface CandidateReview {
+  decision: "accept" | "reject" | "review" | null;
+  confidence: number | null;
+  suggestedName: string | null;
+  suggestedRole: string | null;
+  reason: string | null;
+}
+
+function auditReviewMap(audit?: Record<string, unknown>) {
+  const reviews = Array.isArray(audit?.candidate_reviews) ? audit.candidate_reviews : [];
+  const map = new Map<string, CandidateReview>();
+  const warnings: string[] = [];
+  for (const item of reviews) {
+    if (!item || typeof item !== "object") continue;
+    const review = item as Record<string, unknown>;
+    if (candidateString(review.sequence)) {
+      warnings.push(
+        `Ignored LLM-proposed sequence in candidate review for ${
+          candidateString(review.candidate_id) || candidateString(review.source_span_id) || "unknown candidate"
+        }.`
+      );
+    }
+    const parsed: CandidateReview = {
+      decision: candidateDecision(review.decision),
+      confidence: candidateNumber(review.confidence),
+      suggestedName: candidateString(review.suggested_name),
+      suggestedRole: candidateString(review.suggested_role),
+      reason: candidateString(review.reason),
+    };
+    for (const key of [candidateString(review.candidate_id), candidateString(review.source_span_id)]) {
+      if (key) map.set(key, parsed);
+    }
+  }
+  return { map, warnings };
+}
+
+function strippedSequenceLetters(sequence: string) {
+  return sequence
+    .replace(/\[[^\]]+\]/g, "")
+    .replace(/N\d+/gi, "")
+    .replace(/r[ACGTU]/g, "")
+    .replace(/[^A-Za-z]/g, "");
+}
+
+function hasUnexpectedLowercase(sequence: string) {
+  const withoutPlaceholders = sequence.replace(/\[[^\]]+\]/g, "");
+  const withoutRnaMods = withoutPlaceholders.replace(/r[ACGTU]/g, "");
+  return /[a-z]/.test(withoutRnaMods);
+}
+
+function hardRejectCandidate(candidate: Record<string, unknown>, llmAccepted = false) {
+  const source = candidateString(candidate.source);
+  if (source === "known_inventory") return null;
+
+  const sequence = candidateString(candidate.sequence) || "";
+  const letters = strippedSequenceLetters(sequence);
+  const sourceText = candidateString(candidate.source_text) || "";
+  const baseLength = letters.length;
+  const hasPlaceholder = /\[[^\]]+\]|N\d+/i.test(sequence);
+  const hasOrientation = candidateOrientation(candidate.orientation_hint) !== "unknown";
+  const hasStrongBases = /[ACGT]{8,}/.test(letters);
+  const hasLabel = /\b(adapter|adaptor|primer|oligo|index|read\s*[12]|truseq|p5|p7|tso|bead|barcode)\b/i.test(
+    sourceText
+  );
+
+  if (hasUnexpectedLowercase(sequence)) {
+    return "Rejected: lowercase English-like text matched the permissive IUPAC fallback.";
+  }
+  if (baseLength < 10 && !hasPlaceholder) {
+    return "Rejected: candidate is too short without an explicit variable-region placeholder.";
+  }
+  if (!hasStrongBases && !hasPlaceholder) {
+    return "Rejected: candidate lacks a convincing A/C/G/T sequence core.";
+  }
+  if (!llmAccepted && source === "regex" && !hasOrientation && !hasLabel && !hasPlaceholder) {
+    return "Rejected: regex fallback hit has no strong oligo context.";
+  }
+  return null;
+}
+
+function cleanCandidateName(name: string | null, index: number) {
+  if (!name) return `Unlabeled oligo candidate ${index + 1}`;
+  const trimmed = name.trim();
+  if (/^[35]['’′]?$/.test(trimmed)) return `Unlabeled oligo candidate ${index + 1}`;
+  if (trimmed.length > 100 && /[ACGT]{12,}/.test(trimmed)) {
+    return `Unlabeled oligo candidate ${index + 1}`;
+  }
+  return trimmed;
+}
+
+function inventoryToAdapterPrimerSequences(
+  inventory: PythonProtocolContext["inventory"],
+  audit?: Record<string, unknown>
+): { oligos: FinalOligo[]; warnings: string[] } {
+  const { map: reviews, warnings } = auditReviewMap(audit);
+  const rawOligos = (inventory.candidates || []).flatMap((candidate, index) => {
     const rawSource = candidateString(candidate.source);
-    const source = rawSource === "known_inventory" ? "known_inventory" : "deterministic";
+    const source: FinalOligo["source"] =
+      rawSource === "known_inventory" ? "known_inventory" : "deterministic";
+    const candidateId = candidateString(candidate.id);
+    const spanId = candidateString(candidate.source_span_id);
+    const review = (candidateId && reviews.get(candidateId)) || (spanId && reviews.get(spanId)) || null;
+    const hardRejectReason = hardRejectCandidate(candidate, review?.decision === "accept");
+    if (hardRejectReason) return [];
+    if (review?.decision === "reject") return [];
+
+    const reviewStatus: FinalOligo["review_status"] =
+      review?.decision === "accept"
+        ? "accepted"
+        : review?.decision === "review"
+          ? "needs_review"
+          : "accepted_by_rules";
+    const reviewNote =
+      review?.reason ||
+      (reviewStatus === "accepted_by_rules"
+        ? "Passed deterministic final-output filters; no LLM candidate confidence was available."
+        : null);
+
     return {
       name:
-        candidateString(candidate.name_hint) ||
+        cleanCandidateName(review?.suggestedName || candidateString(candidate.name_hint), index) ||
         candidateString(candidate.inventory_id) ||
         `Oligo sequence ${index + 1}`,
-      role: candidateString(candidate.role_hint),
+      role: review?.suggestedRole || candidateString(candidate.role_hint),
       sequence: candidateString(candidate.sequence),
       orientation: candidateOrientation(candidate.orientation_hint),
       modifications: candidateStringArray(candidate.modifications),
       source,
       inventory_id: candidateString(candidate.inventory_id),
-      source_span_ids: [candidateString(candidate.source_span_id)].filter(
-        (item): item is string => Boolean(item)
-      ),
+      source_span_ids: [spanId].filter((item): item is string => Boolean(item)),
+      confidence: review?.confidence ?? null,
+      review_status: reviewStatus,
+      review_note: reviewNote,
       uncertainty:
-        rawSource === "regex"
-          ? "Detected by deterministic sequence-pattern fallback; verify name and role."
-          : null,
+        reviewStatus === "needs_review"
+          ? "LLM audit marked this candidate for review."
+          : rawSource === "regex" && !review
+            ? "Detected by deterministic sequence-pattern fallback; verify name and role."
+            : null,
     };
   });
+  const oligos = dedupeFinalOligos(rawOligos);
+  return { oligos, warnings };
+}
+
+function dedupeFinalOligos(oligos: FinalOligo[]) {
+  const bySequence = new Map<string, FinalOligo>();
+  for (const oligo of oligos) {
+    const key = [
+      oligo.sequence || "",
+      oligo.role || "",
+      oligo.orientation || "",
+      oligo.inventory_id || "",
+    ].join("|");
+    const current = bySequence.get(key);
+    if (!current) {
+      bySequence.set(key, { ...oligo });
+      continue;
+    }
+
+    current.source_span_ids = Array.from(
+      new Set([...current.source_span_ids, ...oligo.source_span_ids])
+    );
+    if (!current.confidence || (oligo.confidence && oligo.confidence > current.confidence)) {
+      current.confidence = oligo.confidence;
+    }
+    if (current.review_status !== "accepted" && oligo.review_status === "accepted") {
+      current.review_status = oligo.review_status;
+      current.review_note = oligo.review_note;
+    }
+  }
+  return Array.from(bySequence.values());
 }
 
 async function runAudit(
@@ -262,7 +451,7 @@ async function runAudit(
     const auditResult = await generateText({
       model: resolveModel(modelId || DEFAULT_MODEL),
       system:
-        "You are a strict sequencing protocol sequence-inventory auditor. Return only valid JSON. Do not mutate files or propose changes as if they were already applied.",
+        "You are a strict sequencing protocol sequence-inventory auditor. Return only valid JSON. Do not mutate files or propose changes as if they were already applied. Never generate, rewrite, normalize, repair, complete, reverse-complement, or otherwise modify sequence strings.",
       messages: [{ role: "user", content: [{ type: "text", text: protocolContext.audit_prompt }] }],
       stopWhen: stepCountIs(2),
     });
@@ -343,14 +532,18 @@ export async function extractProtocolStaged(
     candidates: [],
     source_spans: {},
   });
+  const oligoResult = inventoryToAdapterPrimerSequences(protocolContext.inventory, audit);
   const protocol: Protocol = ProtocolSchema.parse({
     metadata: metadataOnly.metadata || {},
-    adapter_primer_sequences: inventoryToAdapterPrimerSequences(protocolContext.inventory),
+    adapter_primer_sequences: oligoResult.oligos,
     source_spans: {
       ...(protocolContext.inventory.source_spans || {}),
       ...((metadataOnly.source_spans as Record<string, unknown> | undefined) || {}),
     },
-    warnings: Array.isArray(metadataOnly.warnings) ? metadataOnly.warnings : [],
+    warnings: [
+      ...(Array.isArray(metadataOnly.warnings) ? metadataOnly.warnings : []),
+      ...oligoResult.warnings,
+    ],
   });
 
   const result = audit ? { protocol, raw: text, audit } : { protocol, raw: text };

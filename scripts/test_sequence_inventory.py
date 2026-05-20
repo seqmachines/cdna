@@ -53,6 +53,15 @@ def main() -> int:
     heading = extract_sequence_inventory("LIBRARY CONSTRUCTION AND AMPLIFICATION\n")
     assert_true(not heading["candidates"], "expected uppercase heading to be ignored")
 
+    false_positive_text = """contained herein shall constitute any warranty, express or implied
+Step1:GEMGenerationandBarcoding 10xgenomics.com 31
+"""
+    false_positive = extract_sequence_inventory(false_positive_text)
+    assert_true(
+        not any(candidate["sequence"].lower() in {"warranty", "nandbarc"} for candidate in false_positive["candidates"]),
+        "expected English/PDF-header false positives to be ignored",
+    )
+
     tenx = extract_sequence_inventory(TENX_CHROMIUM_5_SECTION_1)
     tenx_sequences = {candidate["sequence"] for candidate in tenx["candidates"]}
     tenx_names = {candidate["name_hint"] for candidate in tenx["candidates"]}

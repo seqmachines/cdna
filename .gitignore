@@ -26,6 +26,7 @@
 *.pem
 __pycache__/
 *.pyc
+*.egg-info/
 
 # debug
 npm-debug.log*

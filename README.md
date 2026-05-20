@@ -1,12 +1,12 @@
 # cDNA
 
-Parse sequencing protocol documents into structured scg_lib_structs-style JSON. Supports multiple LLM providers via the Vercel AI Gateway.
+Parse sequencing protocol documents into structured scg_lib_structs-style JSON. The web app runs on Next.js/Vercel, while offline parser curation runs through the Python `cdna` CLI with LiteLLM.
 
 ## Setup
 
 ```bash
 npm install
-python3 -m pip install -r requirements.txt
+python3 -m pip install -e .
 ```
 
 Create `.env.local`:
@@ -15,7 +15,7 @@ Create `.env.local`:
 GOOGLE_GENERATIVE_AI_API_KEY=your-key-here
 ```
 
-Get a Gemini key from [Google AI Studio](https://aistudio.google.com/apikey). 
+Get a Gemini key from [Google AI Studio](https://aistudio.google.com/apikey). The Python `cdna` CLI maps this existing key to LiteLLM's `GEMINI_API_KEY` variable at runtime.
 
 ## Usage
 
@@ -63,8 +63,13 @@ PDF inputs are converted to text locally with Python `pypdf` before extraction. 
 Each successful `/api/extract` run writes deterministic local artifacts under `outputs/`:
 
 - `<source>.extract.json` — the final parsed API response after schema validation.
+- `<source>.final-oligos.tsv` — the final shaped oligo table from `protocol.adapter_primer_sequences`.
 - `<source>.sequence-inventory.tsv` — every deterministic sequence candidate from `scripts/sequence_inventory.py`.
 - `<source>.protocol.txt` — the extracted text used for deterministic extraction and LLM metadata parsing.
+
+The raw `sequence-inventory.tsv` may include debug candidates that are later rejected from the final output. Its score column is `heuristic_score`, not model confidence. The final JSON and `final-oligos.tsv` use deterministic filters to remove English-word/PDF-header false positives, and use LLM audit `candidate_reviews[].confidence` when the audit returns per-candidate confidence.
+
+The LLM audit is annotation-only for oligos: it may accept, reject, flag for review, suggest names/roles, and assign confidence to existing deterministic candidates. It must not generate or modify sequence strings, and the server ignores any sequence string returned in `candidate_reviews`.
 
 Known adapter and primer elements are seeded in `data/sequence_inventory/oligos.tsv`. The extractor merges known inventory hits with deterministic sequence candidates, deduplicates subsequence hits, and returns advisory LLM audit findings for human review only. The LLM does not modify the TSV or extractor code.
 
@@ -72,6 +77,39 @@ To smoke-test sequence inventory extraction:
 
 ```bash
 python3 scripts/test_sequence_inventory.py
+```
+
+## Oligo curation loop
+
+Use the Python/Typer curation loop when an LLM audit spots adapter/primer terms that the deterministic extractor missed. The Next.js API does not mutate code or the oligo database during a request; this command writes review artifacts first.
+
+```bash
+cdna curate oligos \
+  --input /path/to/protocol.pdf \
+  --model gemini/gemini-3.1-pro-preview \
+  --max-iterations 5
+```
+
+Artifacts are written under `outputs/curation/<protocol>/`:
+
+- `iteration-N.protocol.txt` — text used for extraction and audit.
+- `iteration-N.sequence-inventory.tsv` — deterministic candidates from `scripts/sequence_inventory.py`.
+- `iteration-N.audit.json` — LLM audit of named oligo terms, candidate reviews, and missing cases.
+- `iteration-N.missing-oligos.tsv` — human-readable missing/term checklist.
+- `iteration-N.proposed-extractor.patch` — review-only patch proposal for the deterministic extractor.
+- `iteration-N.pending-inventory.tsv` — review-only TSV rows for possible DB additions.
+
+The LLM may propose patches and pending rows, but it may not generate or modify sequence strings. To approve a proposal, review the artifacts, copy accepted changes to `approved-extractor.patch` and/or `approved-inventory.tsv` in the same curation directory, then resume:
+
+```bash
+cdna curate oligos resume \
+  --run-dir outputs/curation/<protocol>
+```
+
+To run deterministic oligo extraction without the LLM audit loop:
+
+```bash
+cdna extract oligos --input /path/to/protocol.pdf --output outputs/protocol.sequence-inventory.tsv
 ```
 
 ## Slack bot

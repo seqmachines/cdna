@@ -13,7 +13,10 @@
 - Added an LLM audit prompt for human review of suspected missed oligo elements, regex gaps, proposed TSV rows, and proposed extractor changes.
 - Added a reduced v1 protocol schema covering metadata, adapter/primer sequences, source spans, and warnings.
 - Added extractor coverage for 10x Chromium 5' Section 1-style composite oligos, placeholders, nested primer labels, double-stranded adapters, and subsequence deduplication.
-- Added deterministic `/api/extract` artifact writes under `outputs/`: final parsed JSON, raw sequence-inventory TSV, and extracted protocol text.
+- Added deterministic `/api/extract` artifact writes under `outputs/`: final parsed JSON, final oligo TSV, raw sequence-inventory TSV, and extracted protocol text.
+- Added final-output filtering for English-word/PDF-header sequence false positives and LLM audit candidate-review confidence.
+- Enforced annotation-only LLM oligo audits; final sequence strings can only come from deterministic extraction.
+- Added the Python/Typer `cdna` CLI for deterministic oligo extraction and a LiteLLM-powered curation loop with review-only patch/DB artifacts and human-gated resume.
 - Added a Python smoke-test script for sequence inventory extraction.
 
 ### Notes
