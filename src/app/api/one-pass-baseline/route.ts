@@ -9,6 +9,12 @@ export function OPTIONS(req: Request) {
   return handleCorsOptions(req);
 }
 
+function parseCandidates(value: string | null) {
+  if (!value) return [];
+  const parsed = JSON.parse(value);
+  return Array.isArray(parsed) ? parsed : parsed.candidates || [];
+}
+
 export async function POST(req: Request) {
   const cors = corsHeaders(req);
 
@@ -18,6 +24,8 @@ export async function POST(req: Request) {
     const textField = formData.get("text") as string | null;
     const fileField = formData.get("file");
     const modelField = formData.get("model") as string | null;
+    const protocolSlug = formData.get("protocol_slug") as string | null;
+    const candidates = parseCandidates(formData.get("candidates") as string | null);
 
     if (fileField && fileField instanceof File) {
       const buffer = Buffer.from(await fileField.arrayBuffer());
@@ -25,7 +33,8 @@ export async function POST(req: Request) {
       const data = await extractProtocolOnePassBaseline(
         fileField.name,
         input,
-        modelField || undefined
+        modelField || undefined,
+        { protocolSlug: protocolSlug || undefined, candidates }
       );
       return NextResponse.json(data, { headers: cors });
     }
@@ -48,7 +57,12 @@ export async function POST(req: Request) {
 
       if (buffer) {
         const input = await prepareProtocolInput(buffer, fileName, contentType);
-        const data = await extractProtocolOnePassBaseline(urlField, input, modelField || undefined);
+        const data = await extractProtocolOnePassBaseline(
+          urlField,
+          input,
+          modelField || undefined,
+          { protocolSlug: protocolSlug || undefined, candidates }
+        );
         return NextResponse.json(data, { headers: cors });
       }
 
@@ -62,7 +76,8 @@ export async function POST(req: Request) {
       const data = await extractProtocolOnePassBaseline(
         "pasted text",
         { text: textField },
-        modelField || undefined
+        modelField || undefined,
+        { protocolSlug: protocolSlug || undefined, candidates }
       );
       return NextResponse.json(data, { headers: cors });
     }

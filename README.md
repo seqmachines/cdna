@@ -54,7 +54,9 @@ Response:
 }
 ```
 
-The one-call LLM baseline is available at `POST /api/one-pass-baseline`.
+The one-call full-protocol LLM baseline is available at `POST /api/one-pass-baseline`.
+For oligo-only benchmark runs, send `protocol_slug` plus name-only `candidates`
+to that same endpoint; no separate oligo-only endpoint is required.
 
 The extraction APIs do not use web search fallback. Provide a reachable URL, uploaded file, or pasted protocol text.
 
@@ -79,38 +81,99 @@ To smoke-test sequence inventory extraction:
 python3 scripts/test_sequence_inventory.py
 ```
 
-## Oligo curation loop
+## Oligo extraction
 
-Use the Python/Typer curation loop when an LLM audit spots adapter/primer terms that the deterministic extractor missed. The Next.js API does not mutate code or the oligo database during a request; this command writes review artifacts first.
+Use the Python/Typer extraction command for customer-safe oligo extraction. It runs the deterministic extractor, asks the LLM to audit once, and if needed applies a proposed extractor patch to a temporary per-run copy before rerunning extraction. It does not mutate the reviewed oligo database or the canonical extractor.
 
 ```bash
-cdna curate oligos \
+cdna extract oligos \
   --input /path/to/protocol.pdf \
   --model gemini/gemini-3.1-pro-preview \
-  --max-iterations 5
+  --output outputs/protocol.final-oligos.tsv
 ```
 
-Artifacts are written under `outputs/curation/<protocol>/`:
+Artifacts are written next to the final output:
 
-- `iteration-N.protocol.txt` — text used for extraction and audit.
-- `iteration-N.sequence-inventory.tsv` — deterministic candidates from `scripts/sequence_inventory.py`.
-- `iteration-N.audit.json` — LLM audit of named oligo terms, candidate reviews, and missing cases.
-- `iteration-N.missing-oligos.tsv` — human-readable missing/term checklist.
-- `iteration-N.proposed-extractor.patch` — review-only patch proposal for the deterministic extractor.
-- `iteration-N.pending-inventory.tsv` — review-only TSV rows for possible DB additions.
+- `<source>.protocol.txt` — text used for extraction and audit.
+- `<source>.initial.sequence-inventory.tsv` — deterministic candidates before LLM audit repair.
+- `<source>.audit.json` — LLM audit of named oligo terms, candidate reviews, and missing cases.
+- `<source>.proposed-extractor.patch` — temporary patch proposal, if any.
+- `<source>.final.sequence-inventory.tsv` — deterministic candidates after temporary repair.
+- `<source>.final-oligos.tsv` — final shaped oligo table.
+- `<source>.extract.json` — full extraction result and artifact paths.
 
-The LLM may propose patches and pending rows, but it may not generate or modify sequence strings. To approve a proposal, review the artifacts, copy accepted changes to `approved-extractor.patch` and/or `approved-inventory.tsv` in the same curation directory, then resume:
+The LLM may propose patches, but it may not generate or modify final sequence strings. Final sequences must come from deterministic extraction output or reviewed inventory rows.
+
+To run deterministic oligo extraction without LLM audit or temporary repair:
 
 ```bash
-cdna curate oligos resume \
-  --run-dir outputs/curation/<protocol>
+cdna extract oligos \
+  --input /path/to/protocol.pdf \
+  --output outputs/protocol.final-oligos.tsv \
+  --deterministic-only
 ```
 
-To run deterministic oligo extraction without the LLM audit loop:
+For benchmark runs with an external name-only candidate list, the existing v1
+extractor path accepts grouped sources directly:
 
 ```bash
-cdna extract oligos --input /path/to/protocol.pdf --output outputs/protocol.sequence-inventory.tsv
+cdna extract oligos \
+  --protocol-slug split-seq \
+  --candidate-json /path/to/candidates.json \
+  --input /path/to/SPLiT-seq.txt \
+  --input /path/to/SPLiT-seq.xlsx.txt \
+  --benchmark-json-output outputs/split-seq.v1.json
 ```
+
+Candidate-list benchmark mode is deterministic-only: it does not run the LLM
+audit/repair layer, so benchmark scores reflect the extractor and name-matching
+logic directly.
+
+To let Codex propose a generic extractor patch before this deterministic run:
+
+```bash
+cdna extract oligos \
+  --protocol-slug split-seq \
+  --candidate-json /path/to/train_fetch_ids.json \
+  --input /path/to/SPLiT-seq.txt \
+  --input /path/to/SPLiT-seq.xlsx.txt \
+  --benchmark-json-output outputs/split-seq.v1.json \
+  --artifacts-dir outputs/split-seq.v1 \
+  --use-codex-update \
+  --codex-out outputs/split-seq.codex
+```
+
+The Codex prompt includes only unique possible adapter/primer/oligo names from
+the candidate file plus the protocol text being extracted. Use
+`--codex-dry-run` to write the prompt without calling Codex, and
+`--apply-to-cdna` to apply a guarded patch directly to this cDNA working tree.
+
+The direct benchmark wrappers are still available for local cDNA debugging:
+
+```bash
+cdna benchmark deterministic-oligos \
+  --protocol-slug split-seq \
+  --candidate-json /path/to/candidates.json \
+  --input /path/to/SPLiT-seq.pdf \
+  --input /path/to/SPLiT-seq.xlsx \
+  --output outputs/split-seq.deterministic.json \
+  --deterministic-only
+
+cdna benchmark baseline-oligo \
+  --protocol-slug split-seq \
+  --candidate-json /path/to/candidates.json \
+  --input /path/to/SPLiT-seq.pdf \
+  --input /path/to/SPLiT-seq.xlsx \
+  --output outputs/split-seq.baseline-oligo.json
+```
+
+Benchmark candidates are names/IDs only. They must not contain known sequence
+strings; the deterministic benchmark mode disables the curated known-sequence
+inventory so final sequence strings come only from the supplied protocol files.
+
+## Oligo curation
+
+Owner/developer curation is separate. Use `cdna curate oligos` to create review artifacts, then manually place approved files in the run directory and run `cdna curate oligos promote --run-dir outputs/curation/<protocol>` to update the canonical extractor or reviewed oligo DB.
 
 ## Slack bot
 

@@ -13,6 +13,7 @@ import {
 import type { UserContent } from "ai";
 
 type FinalOligo = Protocol["adapter_primer_sequences"][number];
+type OligoCandidate = Record<string, unknown>;
 
 const MIME_TYPES: Record<string, string> = {
   ".pdf": "application/pdf",
@@ -76,6 +77,110 @@ function metadataOnlyJsonPrompt() {
 For this call, extract metadata only:
 - Return adapter_primer_sequences as [].
 - Do not add oligo rows. Oligo rows are supplied by the deterministic extractor.`;
+}
+
+function oligoBaselineJsonPrompt() {
+  return `You are cDNA's oligo-only baseline extractor.
+
+Return ONLY valid JSON:
+{
+  "records": [
+    {
+      "canonical_id": "",
+      "display_name": "",
+      "record_type": "adapter",
+      "protocol_version": null,
+      "evidence": "",
+      "sequence": "",
+      "orientation": "5_to_3"
+    }
+  ],
+  "source_spans": {},
+  "warnings": []
+}
+
+Rules:
+- Extract only adapter, primer, and oligo records.
+- Use canonical_id/output_id/fetch_id exactly from the candidate list when candidates are provided.
+- Copy evidence and sequences exactly from the provided source text.
+- Do not infer, complete, repair, normalize, reverse-complement, or invent sequence strings.
+- Omit named records when exact bases are absent.`;
+}
+
+function extractJSON(text: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {}
+  const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (fenceMatch) {
+    try {
+      return JSON.parse(fenceMatch[1]) as Record<string, unknown>;
+    } catch {}
+  }
+  const braceMatch = text.match(/\{[\s\S]*\}/);
+  if (braceMatch) {
+    try {
+      return JSON.parse(braceMatch[0]) as Record<string, unknown>;
+    } catch {}
+  }
+  return null;
+}
+
+function baselineCandidateString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function baselineOligoProtocol(rawText: string, candidates: OligoCandidate[] = []) {
+  const parsed = extractJSON(rawText) || {};
+  const rawRows = Array.isArray(parsed.records)
+    ? parsed.records
+    : Array.isArray(parsed.adapter_primer_sequences)
+    ? parsed.adapter_primer_sequences
+    : [];
+  const candidatesById = new Map<string, OligoCandidate>();
+  for (const candidate of candidates) {
+    for (const key of ["canonical_id", "output_id", "fetch_id"]) {
+      const value = baselineCandidateString(candidate[key]);
+      if (value) candidatesById.set(value, candidate);
+    }
+  }
+  const adapter_primer_sequences = rawRows
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+    .map((item) => {
+      const id = baselineCandidateString(item.canonical_id) || baselineCandidateString(item.output_id) || baselineCandidateString(item.fetch_id);
+      const candidate = (id && candidatesById.get(id)) || {};
+      const name =
+        baselineCandidateString(item.name) ||
+        baselineCandidateString(item.display_name) ||
+        baselineCandidateString(candidate.fetch_name) ||
+        baselineCandidateString(candidate.display_name) ||
+        id ||
+        "Unlabeled oligo";
+      return {
+        ...item,
+        canonical_id: baselineCandidateString(candidate.output_id) || id,
+        name,
+        display_name: baselineCandidateString(item.display_name) || baselineCandidateString(candidate.display_name) || name,
+        record_type: baselineCandidateString(item.record_type) || baselineCandidateString(candidate.record_type) || "oligo",
+        protocol_version: item.protocol_version ?? candidate.protocol_version ?? null,
+        evidence: baselineCandidateString(item.evidence) || baselineCandidateString(item.sequence) || "",
+        sequence: baselineCandidateString(item.sequence),
+        orientation: item.orientation || "unknown",
+        modifications: Array.isArray(item.modifications) ? item.modifications : [],
+        source: "llm_named_missing",
+        inventory_id: null,
+        source_span_ids: Array.isArray(item.source_span_ids) ? item.source_span_ids : [],
+      };
+    });
+  return ProtocolSchema.parse({
+    metadata: {},
+    adapter_primer_sequences,
+    source_spans: parsed.source_spans || {},
+    warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
+  });
 }
 
 function hasAuditFindings(audit: Record<string, unknown>) {
@@ -473,8 +578,28 @@ async function runAudit(
 export async function extractProtocolOnePassBaseline(
   source: string,
   options: { fileData?: Buffer; fileName?: string; text?: string },
-  modelId?: string
+  modelId?: string,
+  benchmark?: { protocolSlug?: string; candidates?: OligoCandidate[] }
 ): Promise<ProtocolParseResult> {
+  const candidateList = benchmark?.candidates || [];
+  if (candidateList.length > 0) {
+    const promptText = `Source: ${source}
+Protocol slug: ${benchmark?.protocolSlug || ""}
+
+Candidate adapter/primer/oligo names:
+${JSON.stringify(candidateList, null, 2)}
+
+Protocol content:
+${options.text || ""}`;
+    const { text } = await generateText({
+      model: resolveModel(modelId || DEFAULT_MODEL),
+      system: oligoBaselineJsonPrompt(),
+      messages: [{ role: "user", content: promptText }],
+      stopWhen: stepCountIs(5),
+    });
+    return { protocol: baselineOligoProtocol(text, candidateList), raw: text };
+  }
+
   const { text } = await generateText({
     model: resolveModel(modelId || DEFAULT_MODEL),
     system: baseProtocolJsonPrompt(),

@@ -362,7 +362,11 @@ def run_curation(
     return run_dir
 
 
-def resume_curation(run_dir: Path, model: str | None = None, max_iterations: int | None = None) -> Path:
+def resume_curation(
+    run_dir: Path,
+    model: str | None = None,
+    max_iterations: int | None = None,
+) -> Path:
     load_env_local()
     run_dir = run_dir.expanduser().resolve()
     state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))

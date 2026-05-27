@@ -25,6 +25,14 @@ export function isTextInput(fileName = "", contentType = "") {
   return lowerContentType.startsWith("text/") || TEXT_EXTENSIONS.has(ext);
 }
 
+export function isXlsxInput(fileName = "", contentType = "") {
+  const lowerContentType = contentType.toLowerCase();
+  return (
+    lowerContentType.includes("spreadsheetml.sheet") ||
+    fileName.toLowerCase().endsWith(".xlsx")
+  );
+}
+
 export async function extractPdfText(buffer: Buffer, fileName = "protocol.pdf") {
   const dir = await mkdtemp(path.join(tmpdir(), "cdna-pdf-"));
   const pdfPath = path.join(dir, `${randomUUID()}-${path.basename(fileName || "protocol.pdf")}`);
@@ -44,6 +52,25 @@ export async function extractPdfText(buffer: Buffer, fileName = "protocol.pdf") 
   }
 }
 
+export async function extractXlsxText(buffer: Buffer, fileName = "protocol.xlsx") {
+  const dir = await mkdtemp(path.join(tmpdir(), "cdna-xlsx-"));
+  const xlsxPath = path.join(dir, `${randomUUID()}-${path.basename(fileName || "protocol.xlsx")}`);
+
+  try {
+    await writeFile(xlsxPath, buffer);
+    const scriptPath = path.join(process.cwd(), "scripts", "xlsx_to_text.py");
+    const { stdout } = await execFileAsync("python3", [scriptPath, xlsxPath], {
+      maxBuffer: 50 * 1024 * 1024,
+    });
+    return stdout;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "XLSX text extraction failed";
+    throw new Error(`XLSX text extraction failed: ${message}`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 export async function prepareProtocolInput(
   buffer: Buffer,
   fileName: string,
@@ -51,6 +78,10 @@ export async function prepareProtocolInput(
 ): Promise<PreparedProtocolInput> {
   if (isPdfInput(fileName, contentType)) {
     return { text: await extractPdfText(buffer, fileName) };
+  }
+
+  if (isXlsxInput(fileName, contentType)) {
+    return { text: await extractXlsxText(buffer, fileName) };
   }
 
   if (isTextInput(fileName, contentType)) {

@@ -16,8 +16,9 @@
 - Added deterministic `/api/extract` artifact writes under `outputs/`: final parsed JSON, final oligo TSV, raw sequence-inventory TSV, and extracted protocol text.
 - Added final-output filtering for English-word/PDF-header sequence false positives and LLM audit candidate-review confidence.
 - Enforced annotation-only LLM oligo audits; final sequence strings can only come from deterministic extraction.
-- Added the Python/Typer `cdna` CLI for deterministic oligo extraction and a LiteLLM-powered curation loop with review-only patch/DB artifacts and human-gated resume.
+- Added the Python/Typer `cdna` CLI for customer-safe oligo extraction with one-shot LiteLLM audit, temporary per-run extractor repair, and separate owner/developer curation promotion.
 - Added a Python smoke-test script for sequence inventory extraction.
+- Removed the obsolete one-time Firestore migration script ahead of the planned Cognee-backed memory adapter.
 
 ### Notes
 
