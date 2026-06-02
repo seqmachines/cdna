@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/outputs
 
 # next.js
 /.next/
@@ -23,6 +24,9 @@
 # misc
 .DS_Store
 *.pem
+__pycache__/
+*.pyc
+*.egg-info/
 
 # debug
 npm-debug.log*
