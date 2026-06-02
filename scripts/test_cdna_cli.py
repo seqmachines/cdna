@@ -532,6 +532,23 @@ def main() -> int:
             == "split-seq_test-primer",
             "expected baseline-oligo to preserve canonical ID",
         )
+        baseline_prompt = (tmp_path / "baseline-artifacts" / "split-seq.baseline-oligo.prompt.txt").read_text(encoding="utf-8")
+        assert_true(
+            "Baseline Oligo Extraction Skill" in baseline_prompt,
+            "expected baseline-oligo prompt to include the oligo extraction skill",
+        )
+        assert_true(
+            "Collapse these into one generalized family record" in baseline_prompt,
+            "expected baseline-oligo skill to teach family generalization",
+        )
+        assert_true(
+            "Exhaustiveness is required" in baseline_prompt,
+            "expected baseline-oligo prompt to require exhaustive extraction",
+        )
+        assert_true(
+            "There is no hard maximum record count" in baseline_prompt,
+            "expected baseline-oligo skill not to cap output records",
+        )
 
     print("cdna cli smoke tests passed")
     return 0

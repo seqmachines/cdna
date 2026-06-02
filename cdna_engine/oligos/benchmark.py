@@ -9,11 +9,13 @@ from typing import Any
 from cdna_engine.env import load_env_local
 from cdna_engine.io import prepare_protocol_text
 from cdna_engine.llm import complete_text
+from cdna_engine.paths import REPO_ROOT
 
 from .curate import DEFAULT_MODEL
 from .inventory import extract_sequence_inventory, inventory_tsv, write_inventory_json
 
 DEFAULT_BASELINE_PROTOCOL_TEXT_LIMIT = 250_000
+BASELINE_OLIGO_SKILL_PATH = REPO_ROOT / "skills" / "baseline-oligo-extraction.md"
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -728,6 +730,12 @@ def _limit_protocol_text(text: str, limit: int | None) -> tuple[str, str]:
     )
 
 
+def _baseline_oligo_skill_text() -> str:
+    if not BASELINE_OLIGO_SKILL_PATH.exists():
+        return ""
+    return BASELINE_OLIGO_SKILL_PATH.read_text(encoding="utf-8").strip()
+
+
 def _baseline_prompt(
     protocol_slug: str,
     text: str,
@@ -748,7 +756,14 @@ def _baseline_prompt(
         for item in candidates
     ]
     protocol_text, truncation_note = _limit_protocol_text(text, protocol_text_limit)
+    skill_text = _baseline_oligo_skill_text()
+    skill_section = (
+        f"\nBaseline oligo extraction skill:\n{skill_text}\n"
+        if skill_text
+        else ""
+    )
     return f"""Protocol slug: {protocol_slug}
+{skill_section}
 
 Candidate adapter/primer/oligo names:
 {json.dumps(prompt_candidates, indent=2, ensure_ascii=False)}
@@ -769,10 +784,17 @@ Extract oligo records only. Return ONLY valid JSON:
 }}
 
 Rules:
-- Use canonical_id exactly from the candidate list.
+- Exhaustiveness is required. List all possible adapter, primer, oligo, sequencing-primer, index-primer, linker, blocking-strand, and collapsed family records supported by exact source text.
+- Do not stop after bead, gel-bead, or barcode oligos. Inspect all source sections, including final library/product constructs and sequencing sections.
+- Do a final coverage pass over every source line containing "oligo", "primer", "adapter", "adaptor", "bead", "index", "sample index", "read 1", "read 2", "P5", "P7", "Nextera", "TruSeq", "TSO", "cDNA", "pre-amp", "PCR", "linker", or "blocking".
+- For 10x-style protocols, include every exact sequence-bearing bead/gel-bead oligo, cDNA primer, pre-amplification primer, sample-index/library PCR primer, P5/P7 adapter segment, read/index sequencing primer, and final library/product construct segment when bases are printed.
+- A response with only one or two records is almost always incomplete unless the full protocol source contains only one or two exact sequence-bearing oligo/primer/adapter entries.
+- Use candidate names as name-only guidance. Prefer exact candidate canonical_id values when they match, but output real protocol-supported held-out items even when no candidate ID is exact.
 - Return only records supported by copied source text.
 - evidence must be the exact copied sequence/evidence text from the source.
-- Do not infer, repair, complete, reverse-complement, or generate sequence strings.
+- Do not infer, repair, complete, reverse-complement, or generate raw sequence strings.
+- Collapse repeated plate/table rows into generalized family records with bracket placeholders when the source rows share a backbone.
+- Do not collapse distinct named oligos, adapters, primers, sequencing primers, index primers, or PCR primers into one record.
 - If a candidate name is present but exact bases are absent, omit it.
 
 Protocol source text:
