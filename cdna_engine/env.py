@@ -27,3 +27,5 @@ def load_env_local(path: Path | None = None) -> None:
 
     if "GEMINI_API_KEY" not in os.environ and "GOOGLE_GENERATIVE_AI_API_KEY" in os.environ:
         os.environ["GEMINI_API_KEY"] = os.environ["GOOGLE_GENERATIVE_AI_API_KEY"]
+    if "GOOGLE_GENERATIVE_AI_API_KEY" not in os.environ and "GEMINI_API_KEY" in os.environ:
+        os.environ["GOOGLE_GENERATIVE_AI_API_KEY"] = os.environ["GEMINI_API_KEY"]

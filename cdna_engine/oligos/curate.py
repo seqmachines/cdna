@@ -20,7 +20,7 @@ from .inventory import build_protocol_context, inventory_tsv, parse_audit, write
 
 console = Console()
 
-DEFAULT_MODEL = "gemini/gemini-3.1-pro-preview"
+DEFAULT_MODEL = "google/gemini-3.1-pro-preview"
 INVENTORY_COLUMNS = [
     "id",
     "name",

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 import re
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from pypdf import PdfReader
+
+
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 
 def html_to_text(html: str) -> str:

@@ -82,29 +82,42 @@ For this call, extract metadata only:
 function oligoBaselineJsonPrompt() {
   return `You are cDNA's oligo-only baseline extractor.
 
-Return ONLY valid JSON:
+Return ONLY valid JSON as a ProtocolOligoSet:
 {
-  "records": [
+  "protocol_id": "",
+  "protocol_name": "",
+  "split": "train",
+  "source_files": [],
+  "oligos": [
     {
-      "canonical_id": "",
-      "display_name": "",
-      "record_type": "adapter",
-      "protocol_version": null,
-      "evidence": "",
-      "sequence": "",
-      "orientation": "5_to_3"
+      "oligo_id": "",
+      "protocol_id": "",
+      "protocol_name": "",
+      "name": "",
+      "aliases": [],
+      "role": "adapter",
+      "kind": "single",
+      "sequence": null,
+      "direction": "5_to_3",
+      "components": [],
+      "sequence_source": "explicit_in_protocol",
+      "memory_id": null,
+      "evidence": [
+        { "source_id": null, "page": null, "section": null, "quote": "" }
+      ],
+      "notes": null
     }
   ],
-  "source_spans": {},
-  "warnings": []
+  "notes": null
 }
 
 Rules:
 - Extract only adapter, primer, and oligo records.
 - Use canonical_id/output_id/fetch_id exactly from the candidate list when candidates are provided.
 - Copy evidence and sequences exactly from the provided source text.
-- Do not infer, complete, repair, normalize, reverse-complement, or invent sequence strings.
-- Omit named records when exact bases are absent.`;
+- Do not complete, repair, reverse-complement, or invent sequence strings.
+- If a named oligo is present but exact bases are absent, include it with sequence=null and sequence_source=not_shown_in_protocol.
+- Prefer high recall; ambiguous items should be included with notes.`;
 }
 
 function extractJSON(text: string): Record<string, unknown> | null {
@@ -133,12 +146,29 @@ function baselineCandidateString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function baselineEvidenceText(value: unknown, fallback: string | null) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) =>
+        item && typeof item === "object" && "quote" in item
+          ? baselineCandidateString((item as Record<string, unknown>).quote)
+          : null
+      )
+      .filter((item): item is string => Boolean(item))
+      .join(" | ");
+  }
+  return fallback || "";
+}
+
 function baselineOligoProtocol(rawText: string, candidates: OligoCandidate[] = []) {
   const parsed = extractJSON(rawText) || {};
   const rawRows = Array.isArray(parsed.records)
     ? parsed.records
     : Array.isArray(parsed.adapter_primer_sequences)
     ? parsed.adapter_primer_sequences
+    : Array.isArray(parsed.oligos)
+    ? parsed.oligos
     : [];
   const candidatesById = new Map<string, OligoCandidate>();
   for (const candidate of candidates) {
@@ -151,26 +181,29 @@ function baselineOligoProtocol(rawText: string, candidates: OligoCandidate[] = [
     .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
     .map((item) => {
       const id = baselineCandidateString(item.canonical_id) || baselineCandidateString(item.output_id) || baselineCandidateString(item.fetch_id);
+      const oligoId = baselineCandidateString(item.oligo_id);
       const candidate = (id && candidatesById.get(id)) || {};
       const name =
         baselineCandidateString(item.name) ||
         baselineCandidateString(item.display_name) ||
         baselineCandidateString(candidate.fetch_name) ||
         baselineCandidateString(candidate.display_name) ||
+        oligoId ||
         id ||
         "Unlabeled oligo";
+      const sequence = baselineCandidateString(item.sequence);
       return {
         ...item,
-        canonical_id: baselineCandidateString(candidate.output_id) || id,
+        canonical_id: baselineCandidateString(candidate.output_id) || id || oligoId,
         name,
         display_name: baselineCandidateString(item.display_name) || baselineCandidateString(candidate.display_name) || name,
-        record_type: baselineCandidateString(item.record_type) || baselineCandidateString(candidate.record_type) || "oligo",
+        record_type: baselineCandidateString(item.record_type) || baselineCandidateString(item.role) || baselineCandidateString(candidate.record_type) || "oligo",
         protocol_version: item.protocol_version ?? candidate.protocol_version ?? null,
-        evidence: baselineCandidateString(item.evidence) || baselineCandidateString(item.sequence) || "",
-        sequence: baselineCandidateString(item.sequence),
-        orientation: item.orientation || "unknown",
+        evidence: baselineEvidenceText(item.evidence, sequence),
+        sequence,
+        orientation: item.orientation || item.direction || "unknown",
         modifications: Array.isArray(item.modifications) ? item.modifications : [],
-        source: "llm_named_missing",
+        source: item.sequence_source || "llm_named_missing",
         inventory_id: null,
         source_span_ids: Array.isArray(item.source_span_ids) ? item.source_span_ids : [],
       };

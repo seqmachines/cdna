@@ -768,19 +768,33 @@ def _baseline_prompt(
 Candidate adapter/primer/oligo names:
 {json.dumps(prompt_candidates, indent=2, ensure_ascii=False)}
 
-Extract oligo records only. Return ONLY valid JSON:
+Extract oligo records only. Return ONLY valid JSON as a ProtocolOligoSet:
 {{
-  "records": [
+  "protocol_id": "{protocol_slug}",
+  "protocol_name": "{protocol_slug}",
+  "split": "train",
+  "source_files": [],
+  "oligos": [
     {{
-      "canonical_id": "",
-      "display_name": "",
-      "record_type": "adapter",
-      "protocol_version": null,
-      "evidence": "",
+      "oligo_id": "",
+      "protocol_id": "{protocol_slug}",
+      "protocol_name": "{protocol_slug}",
+      "name": "",
+      "aliases": [],
+      "role": "adapter",
+      "kind": "single",
       "sequence": "",
-      "orientation": "5_to_3"
+      "direction": "5_to_3",
+      "components": [],
+      "sequence_source": "explicit_in_protocol",
+      "memory_id": null,
+      "evidence": [
+        {{"source_id": null, "page": null, "section": null, "quote": ""}}
+      ],
+      "notes": null
     }}
-  ]
+  ],
+  "notes": null
 }}
 
 Rules:
@@ -791,14 +805,28 @@ Rules:
 - A response with only one or two records is almost always incomplete unless the full protocol source contains only one or two exact sequence-bearing oligo/primer/adapter entries.
 - Use candidate names as name-only guidance. Prefer exact candidate canonical_id values when they match, but output real protocol-supported held-out items even when no candidate ID is exact.
 - Return only records supported by copied source text.
-- evidence must be the exact copied sequence/evidence text from the source.
+- evidence must include exact copied sequence/evidence text from the source.
 - Do not infer, repair, complete, reverse-complement, or generate raw sequence strings.
 - Collapse repeated plate/table rows into generalized family records with bracket placeholders when the source rows share a backbone.
 - Do not collapse distinct named oligos, adapters, primers, sequencing primers, index primers, or PCR primers into one record.
-- If a candidate name is present but exact bases are absent, omit it.
+- If a candidate name is present but exact bases are absent, include it with sequence=null and sequence_source=not_shown_in_protocol.
 
 Protocol source text:
 {protocol_text}{truncation_note}"""
+
+
+def _baseline_evidence_text(item: dict[str, Any]) -> str:
+    evidence = item.get("evidence")
+    if isinstance(evidence, str):
+        return evidence
+    if isinstance(evidence, list):
+        quotes = [
+            entry.get("quote")
+            for entry in evidence
+            if isinstance(entry, dict) and _candidate_string(entry.get("quote"))
+        ]
+        return " | ".join(str(quote) for quote in quotes)
+    return _candidate_string(item.get("sequence")) or ""
 
 
 def baseline_oligo_extract(
@@ -844,12 +872,13 @@ def baseline_oligo_extract(
             if item.get(key):
                 candidate_by_id[item[key]] = item
     rows: list[dict[str, Any]] = []
-    for item in parsed.get("records") or parsed.get("adapter_primer_sequences") or []:
+    raw_rows = parsed.get("records") or parsed.get("adapter_primer_sequences") or parsed.get("oligos") or []
+    for item in raw_rows:
         if not isinstance(item, dict):
             continue
-        canonical = item.get("canonical_id") or item.get("fetch_id") or item.get("output_id")
+        canonical = item.get("canonical_id") or item.get("fetch_id") or item.get("output_id") or item.get("oligo_id")
         candidate = candidate_by_id.get(canonical, {})
-        evidence = _candidate_string(item.get("evidence")) or _candidate_string(item.get("sequence")) or ""
+        evidence = _baseline_evidence_text(item)
         rows.append(
             {
                 "canonical_id": candidate.get("output_id") or canonical,
@@ -857,11 +886,11 @@ def baseline_oligo_extract(
                 "name": item.get("name") or candidate.get("fetch_name") or item.get("display_name"),
                 "protocol_slug": protocol_slug,
                 "protocol_version": item.get("protocol_version", candidate.get("protocol_version")),
-                "record_type": item.get("record_type") or candidate.get("record_type") or "oligo",
+                "record_type": item.get("record_type") or item.get("role") or candidate.get("record_type") or "oligo",
                 "sequence": item.get("sequence"),
-                "orientation": item.get("orientation") or "unknown",
+                "orientation": item.get("orientation") or item.get("direction") or "unknown",
                 "modifications": item.get("modifications") or [],
-                "source": "llm_named_missing",
+                "source": item.get("sequence_source") or "llm_named_missing",
                 "inventory_id": None,
                 "source_span_ids": item.get("source_span_ids") or [],
                 "evidence": evidence,

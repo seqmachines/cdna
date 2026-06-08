@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { prepareProtocolInput } from "@/lib/extract-input-text";
 import { extractProtocolOnePassBaseline } from "@/lib/parse-protocol";
+import { extractProtocolScgReport, prepareScgReportInput } from "@/lib/scg-report";
 import { corsHeaders, handleCorsOptions } from "@/lib/cors";
 
+export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export function OPTIONS(req: Request) {
@@ -26,9 +28,16 @@ export async function POST(req: Request) {
     const modelField = formData.get("model") as string | null;
     const protocolSlug = formData.get("protocol_slug") as string | null;
     const candidates = parseCandidates(formData.get("candidates") as string | null);
+    const mode = formData.get("mode") as string | null;
+    const scgReportMode = mode === "scg_report";
 
     if (fileField && fileField instanceof File) {
       const buffer = Buffer.from(await fileField.arrayBuffer());
+      if (scgReportMode) {
+        const input = await prepareScgReportInput(buffer, fileField.name, fileField.type);
+        const data = await extractProtocolScgReport(fileField.name, input, modelField || undefined);
+        return NextResponse.json(data, { headers: cors });
+      }
       const input = await prepareProtocolInput(buffer, fileField.name, fileField.type);
       const data = await extractProtocolOnePassBaseline(
         fileField.name,
@@ -56,6 +65,11 @@ export async function POST(req: Request) {
       }
 
       if (buffer) {
+        if (scgReportMode) {
+          const input = await prepareScgReportInput(buffer, fileName, contentType);
+          const data = await extractProtocolScgReport(urlField, input, modelField || undefined);
+          return NextResponse.json(data, { headers: cors });
+        }
         const input = await prepareProtocolInput(buffer, fileName, contentType);
         const data = await extractProtocolOnePassBaseline(
           urlField,
@@ -73,6 +87,14 @@ export async function POST(req: Request) {
     }
 
     if (textField) {
+      if (scgReportMode) {
+        const data = await extractProtocolScgReport(
+          "pasted text",
+          { text: textField },
+          modelField || undefined
+        );
+        return NextResponse.json(data, { headers: cors });
+      }
       const data = await extractProtocolOnePassBaseline(
         "pasted text",
         { text: textField },

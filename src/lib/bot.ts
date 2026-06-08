@@ -30,7 +30,6 @@ class NoopStateAdapter implements StateAdapter {
   async getList() { return []; }
 }
 import { parseProtocolMarkdown } from "./parse-protocol";
-import { saveProtocol } from "./protocols";
 import { DEFAULT_MODEL, resolveModel } from "./models";
 
 type ThreadStatus = "parsing" | "ready" | "error";
@@ -44,8 +43,6 @@ interface BotThreadState {
   status?: ThreadStatus;
   title?: string;
 }
-
-const PUBLISH_COMMANDS = new Set(["publish", "approve", "lgtm", "save"]);
 
 let _bot: Chat<{ slack: SlackAdapter }, BotThreadState> | undefined;
 
@@ -340,7 +337,7 @@ async function reviseProtocol(
       system:
         "You are cDNA, a sequencing protocol expert. Revise the parsed protocol markdown " +
         "based on the user's feedback. Return only the complete revised markdown document. " +
-        "Preserve markdown structure and keep it publish-ready.\n\n" +
+        "Preserve markdown structure.\n\n" +
         `Source URL: ${state.sourceUrl || "unknown"}\n\n` +
         `Current parsed protocol:\n\n${state.parsedMarkdown}`,
       prompt: `User feedback to apply:\n${feedback}`,
@@ -356,33 +353,11 @@ async function reviseProtocol(
     );
     await postBroadcastMessageWithFallback(
       thread,
-      "Please review it. Reply with questions, more feedback, or say *approve* to push it live."
+      "Please review it. Reply with questions or more feedback."
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Revision failed";
     await thread.post(`Error: ${msg}`);
-  }
-}
-
-async function publishProtocol(thread: Thread<BotThreadState>, state: BotThreadState) {
-  if (!state.parsedMarkdown) {
-    await thread.post("No parsed protocol in this thread.");
-    return;
-  }
-
-  const title = state.title || extractTitle(state.parsedMarkdown);
-  const slug = slugify(title);
-  const source = state.sourceUrl || "";
-
-  try {
-    await saveProtocol(slug, title, source, state.parsedMarkdown);
-    await postBroadcastMessageWithFallback(
-      thread,
-      `Published! Protocol saved as \`${slug}\`.`
-    );
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Publish failed";
-    await thread.post(`Error publishing: ${msg}`);
   }
 }
 
@@ -405,12 +380,6 @@ async function handleThreadReply(
     await thread.post(
       "Still parsing this protocol. I'll post the file here when it's ready."
     );
-    return true;
-  }
-
-  const words = messageText.toLowerCase().trim().split(/\s+/);
-  if (words.some((w) => PUBLISH_COMMANDS.has(w))) {
-    await publishProtocol(thread, state);
     return true;
   }
 
