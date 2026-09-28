@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — pure Python library
+
+### Changed
+
+- Retained the `cdna-engine` distribution, `cdna` import, and `cdna-mcp` entry point.
+- Removed the Next.js app, extraction CLI, `cdna improve`, prompt skills, scripts,
+  Node dependencies, and the legacy `cdna_engine` package.
+- Reduced runtime dependencies to Pydantic and the MCP SDK.
+- Made molecular skill outputs deterministic, with stable provisional state IDs,
+  validated Python inputs, and post-condition checks.
+- Added `MoleculeState` input/output support while preserving dictionary calls
+  and the MCP/host dispatch interface. The molecule schema is unchanged.
+- Rewrote the README for library users and documented Claude Code, Codex, and
+  proofread integration.
+
+### Added
+
+- Skill, schema, and stdio MCP tests, plus a `test` installation extra.
+
+## Historical application changelog
+
+The entries below describe the removed application and retain its version labels.
+
 ## v0.3.0
 
 ### Added

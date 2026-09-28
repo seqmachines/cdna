@@ -5,21 +5,24 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cdna-engine"
 version = "0.2.0"
-description = "cDNA protocol extraction and symbolic molecular skills with an MCP server."
+description = "Deterministic symbolic molecular skills for sequencing-library workflows."
+readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.11"
 dependencies = [
-  "beautifulsoup4>=4.12",
-  "lxml>=5.0",
   "mcp>=1.12,<2",
-  "pydantic>=2.0",
-  "pypdf>=4.0",
-  "rich>=13.0",
-  "typer>=0.12",
+  "pydantic>=2.0,<3",
 ]
 
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
 [project.scripts]
-cdna = "cdna_engine.cli:app"
 cdna-mcp = "cdna.mcp_server:main"
 
 [tool.setuptools]
-packages = ["cdna", "cdna_engine", "cdna_engine.oligos"]
+packages = ["cdna"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
