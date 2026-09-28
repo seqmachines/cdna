@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — pure Python library
+## v0.2.1 — 2026-09-28
 
 ### Changed
 

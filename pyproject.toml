@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cdna-engine"
-version = "0.2.0"
+version = "0.2.1"
 description = "Deterministic symbolic molecular skills for sequencing-library workflows."
 readme = "README.md"
 license = {file = "LICENSE"}
